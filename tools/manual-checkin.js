@@ -470,6 +470,8 @@ console.log(">>> 找到 " + activities.length + " 个今日活动");
 
 if (activities.length === 0) {
     console.log(">>> 没有今日活动，退出");
+    toast("没有今日活动");
+    alert("签到完成", "今日没有需要签到的活动");
     exit();
 }
 

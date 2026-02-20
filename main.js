@@ -683,6 +683,8 @@ function runCheckinFlow() {
     
     if (activities.length === 0) {
         console.log(">>> 没有今日活动");
+        toast("没有今日活动");
+        alert("签到完成", "今日没有需要签到的活动");
         return false;
     }
     
