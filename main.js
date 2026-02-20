@@ -21,6 +21,7 @@ var GLOBAL_TIMEOUT = 180000;
 
 var isRunning = false;
 var todayTriggered = false;
+var fallbackTriggered = false;
 var lastCheckedDate = "";
 
 function getTodayStr() {
@@ -32,6 +33,7 @@ function resetDailyFlag() {
     var today = getTodayStr();
     if (lastCheckedDate !== today) {
         todayTriggered = false;
+        fallbackTriggered = false;
         lastCheckedDate = today;
         console.log("[日期变更] 重置每日触发标记");
     }
@@ -136,10 +138,21 @@ function doCheckin(globalStart) {
         console.log(">>> 点击: 去拍照");
         smartClick(photoBtn);
         
+        var permissionBtn = waitFor(function() {
+            return text("允许").findOnce() || text("始终允许").findOnce() || textContains("仅在使用").findOnce();
+        }, 2000, globalStart);
+        if (permissionBtn) {
+            console.log(">>> 处理权限弹窗");
+            smartClick(permissionBtn);
+            sleep(500);
+        }
+        
         var shutterBtn = waitFor(function() {
+            var minSize = device.width * 0.1;
+            var maxSize = device.width * 0.2;
             return className("android.widget.ImageView").filter(function(w) {
                 var b = w.bounds();
-                return b.width() >= 150 && b.width() <= 200 && Math.abs(b.centerX() - device.width / 2) < 50;
+                return b.width() >= minSize && b.width() <= maxSize && Math.abs(b.centerX() - device.width / 2) < 50;
             }).findOnce();
         }, 5000, globalStart);
         if (shutterBtn) {
@@ -188,8 +201,12 @@ function runCheckinFlow() {
     
     console.log("\n===== 开始签到流程 =====");
     
+    if (!wakeUp()) {
+        console.error(">>> 唤醒失败");
+        return false;
+    }
+    
     console.log(">>> 杀掉企业微信后台...");
-    wakeUp();
     app.openAppSetting(CONFIG.packageName);
     var forceStopBtn = waitFor(function() {
         return text("强行停止").findOnce() || text("结束运行").findOnce();
@@ -206,13 +223,16 @@ function runCheckinFlow() {
     console.log(">>> 启动企业微信...");
     app.launch(CONFIG.packageName);
     sleep(3000);
-    // 等待企业微信界面出现（用 UI 元素检测代替 currentPackage，避免远程运行报错）
-    waitFor(function() { return textContains(CONFIG.entryText).exists() || textContains("工作台").exists(); }, 15000, globalStart);
+    var appLaunched = waitFor(function() { return textContains(CONFIG.entryText).exists() || textContains("工作台").exists(); }, 15000, globalStart);
+    if (!appLaunched) {
+        console.error(">>> 企业微信启动超时");
+        return false;
+    }
     
     var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000, globalStart);
     if (!fudaomao) {
         console.error(">>> 未找到辅导猫入口");
-        return;
+        return false;
     }
     console.log(">>> 点击: 辅导猫");
     smartClick(fudaomao);
@@ -228,24 +248,30 @@ function runCheckinFlow() {
     
     if (activities.length === 0) {
         console.log(">>> 没有今日活动");
-        return;
+        return false;
     }
     
     var results = [];
-    for (var i = 0; i < activities.length; i++) {
+    var processedCount = 0;
+    var hasSuccess = false;
+    while (activities.length > 0) {
         if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
             console.error(">>> 全局超时，退出");
             break;
         }
-        var activity = activities[i];
-        var activityName = activity.text().substring(0, 25);
-        console.log("\n===== 活动 " + (i + 1) + "/" + activities.length + ": " + activityName + " =====");
+        
+        // 总是处理第一个活动，避免索引错位
+        var activity = activities[0];
+        var activityName = (activity.text() || "").substring(0, 25);
+        processedCount++;
+        console.log("\n===== 活动 " + processedCount + ": " + activityName + " =====");
         
         smartClick(activity);
         
         var result;
         try {
             result = doCheckin(globalStart);
+            if (result === "success") hasSuccess = true;
         } catch (e) {
             console.error("签到异常: " + e);
             result = "error";
@@ -256,6 +282,7 @@ function runCheckinFlow() {
         back();
         sleep(1000);
         
+        // 刷新活动列表
         activities = textContains(todayStr).find();
         if (activities.length === 0) {
             console.log(">>> 活动列表丢失，尝试重新进入辅导猫");
@@ -267,7 +294,6 @@ function runCheckinFlow() {
                 sleep(2000);
                 activities = textContains(todayStr).find();
             }
-            if (activities.length === 0) break;
         }
     }
     
@@ -276,27 +302,30 @@ function runCheckinFlow() {
         console.log((idx + 1) + ". " + r.name + " -> " + r.result);
     });
     console.log("===== 签到流程结束 =====\n");
+    return hasSuccess;
 }
 
 function triggerCheckin(reason) {
     if (isRunning) {
         console.log("[忽略] 签到流程正在运行中");
-        return;
+        return false;
     }
     
     console.log("\n[" + reason + "] " + new Date().toLocaleString());
     
     isRunning = true;
-    todayTriggered = true;
     
+    var success = false;
     try {
-        runCheckinFlow();
+        success = runCheckinFlow();
+        if (success) todayTriggered = true;
     } catch (e) {
         console.error("签到流程异常: " + e);
     }
     
     isRunning = false;
     console.log(">>> 签到流程锁已释放");
+    return success;
 }
 
 console.log("===== 辅导猫自动签到服务 =====");
@@ -313,7 +342,7 @@ events.on("notification", function(notification) {
     
     var pkg = notification.getPackageName();
     var title = notification.getTitle() || "";
-    var text = notification.getText() || "";
+    var notificationText = notification.getText() || "";
     
     if (pkg !== CONFIG.packageName) return;
     
@@ -322,7 +351,7 @@ events.on("notification", function(notification) {
         return;
     }
     
-    var content = title + " " + text;
+    var content = title + " " + notificationText;
     var matched = CONFIG.keywords.some(function(kw) {
         return content.indexOf(kw) >= 0;
     });
@@ -333,7 +362,7 @@ events.on("notification", function(notification) {
     }
     
     console.log("  标题: " + title);
-    console.log("  内容: " + text);
+    console.log("  内容: " + notificationText);
     triggerCheckin("通知触发");
 });
 
@@ -342,7 +371,8 @@ console.log("监听中... (保持脚本运行)");
 setInterval(function() {
     resetDailyFlag();
     
-    if (!todayTriggered && isFallbackTime()) {
+    if (!todayTriggered && !fallbackTriggered && isFallbackTime()) {
+        fallbackTriggered = true;
         console.log("[备用定时] 通知触发时段内未签到，执行备用签到");
         triggerCheckin("备用定时");
     }

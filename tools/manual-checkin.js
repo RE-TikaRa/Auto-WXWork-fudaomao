@@ -93,10 +93,21 @@ function doCheckin() {
         console.log(">>> 点击: 去拍照");
         smartClick(photoBtn);
         
+        var permissionBtn = waitFor(function() {
+            return text("允许").findOnce() || text("始终允许").findOnce() || textContains("仅在使用").findOnce();
+        }, 2000);
+        if (permissionBtn) {
+            console.log(">>> 处理权限弹窗");
+            smartClick(permissionBtn);
+            sleep(500);
+        }
+        
         var shutterBtn = waitFor(function() {
+            var minSize = device.width * 0.1;
+            var maxSize = device.width * 0.2;
             return className("android.widget.ImageView").filter(function(w) {
                 var b = w.bounds();
-                return b.width() >= 150 && b.width() <= 200 && Math.abs(b.centerX() - device.width / 2) < 50;
+                return b.width() >= minSize && b.width() <= maxSize && Math.abs(b.centerX() - device.width / 2) < 50;
             }).findOnce();
         }, 5000);
         if (shutterBtn) {
@@ -142,8 +153,12 @@ function doCheckin() {
 
 console.log("===== 手动签到 =====");
 
+if (!wakeUp()) {
+    console.error(">>> 唤醒失败，退出");
+    exit();
+}
+
 console.log(">>> 杀掉企业微信后台...");
-wakeUp();
 app.openAppSetting(CONFIG.packageName);
 var forceStopBtn = waitFor(function() {
     return text("强行停止").findOnce() || text("结束运行").findOnce();
@@ -160,8 +175,11 @@ sleep(300);
 console.log(">>> 启动企业微信...");
 app.launch(CONFIG.packageName);
 sleep(3000);
-// 等待企业微信界面出现（用 UI 元素检测代替 currentPackage，避免远程运行报错）
-waitFor(function() { return textContains(CONFIG.entryText).exists() || textContains("工作台").exists(); }, 15000);
+var appLaunched = waitFor(function() { return textContains(CONFIG.entryText).exists() || textContains("工作台").exists(); }, 15000);
+if (!appLaunched) {
+    console.error(">>> 企业微信启动超时，退出");
+    exit();
+}
 
 var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000);
 if (!fudaomao) {
@@ -186,14 +204,18 @@ if (activities.length === 0) {
 }
 
 var results = [];
-for (var i = 0; i < activities.length; i++) {
+var processedCount = 0;
+while (activities.length > 0) {
     if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
         console.error(">>> 全局超时，退出");
         break;
     }
-    var activity = activities[i];
-    var activityName = activity.text().substring(0, 25);
-    console.log("\n===== 活动 " + (i + 1) + "/" + activities.length + ": " + activityName + " =====");
+    
+    // 总是处理第一个活动，避免索引错位
+    var activity = activities[0];
+    var activityName = (activity.text() || "").substring(0, 25);
+    processedCount++;
+    console.log("\n===== 活动 " + processedCount + ": " + activityName + " =====");
     
     smartClick(activity);
     
@@ -210,6 +232,7 @@ for (var i = 0; i < activities.length; i++) {
     back();
     sleep(1000);
     
+    // 刷新活动列表
     activities = textContains(todayStr).find();
     if (activities.length === 0) {
         console.log(">>> 活动列表丢失，尝试重新进入辅导猫");
@@ -221,7 +244,6 @@ for (var i = 0; i < activities.length; i++) {
             sleep(2000);
             activities = textContains(todayStr).find();
         }
-        if (activities.length === 0) break;
     }
 }
 
