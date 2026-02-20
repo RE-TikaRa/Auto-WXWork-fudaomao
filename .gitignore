@@ -20,3 +20,6 @@ Thumbs.db
 
 # Release packages
 *.zip
+
+# Version folders
+/auto-workwx-v*/
