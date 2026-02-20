@@ -27,25 +27,19 @@ auto.waitFor();
 //   - 关闭省电模式
 // ============================================================================
 
-// 通知 ID - 用于后续更新或取消通知
-var SERVICE_NOTIFICATION_ID = 10086;
-
 // 尝试创建前台服务通知
 try {
-    // 使用最简单的方式发送通知
-    notice("辅导猫签到服务运行中", {
+    notice({
         title: "辅导猫自动签到",
-        notificationId: SERVICE_NOTIFICATION_ID,
+        content: "签到服务运行中",
+        notificationId: 10086,
         isSilent: true,
         autoCancel: false
     });
     console.log("[服务] 前台通知已创建");
     
-    // 注册脚本退出事件，清理通知
     events.on("exit", function() {
-        try {
-            notice.cancel(SERVICE_NOTIFICATION_ID);
-        } catch (e) {}
+        try { notice.cancel(10086); } catch (e) {}
     });
 } catch (e) {
     console.warn("[服务] 无法创建前台通知: " + e);
