@@ -550,7 +550,23 @@ while (activities.length > 0) {
 // 列出每个活动的签到结果，便于用户确认
 // ============================================================================
 console.log("\n===== 结果汇总 =====");
+var successCount = 0;
+var failCount = 0;
+var skipCount = 0;
 results.forEach(function(r, idx) {
     console.log((idx + 1) + ". " + r.name + " -> " + r.result);
+    if (r.result === "success") successCount++;
+    else if (r.result === "already_signed") skipCount++;
+    else failCount++;
 });
 console.log("=== 完成 ===");
+
+// 弹窗显示结果
+var summary = "成功: " + successCount + "\n已签到: " + skipCount + "\n失败: " + failCount;
+if (failCount === 0) {
+    toast("签到完成！");
+    alert("签到完成", summary);
+} else {
+    toast("签到有异常，请检查");
+    alert("签到结果", summary + "\n\n请检查失败的活动");
+}
