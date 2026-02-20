@@ -205,7 +205,9 @@ function runCheckinFlow() {
     
     console.log(">>> 启动企业微信...");
     app.launch(CONFIG.packageName);
-    waitForPackage(CONFIG.packageName, 15000);
+    sleep(3000);
+    // 等待企业微信界面出现（用 UI 元素检测代替 currentPackage，避免远程运行报错）
+    waitFor(function() { return textContains(CONFIG.entryText).exists() || textContains("工作台").exists(); }, 15000, globalStart);
     
     var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000, globalStart);
     if (!fudaomao) {
