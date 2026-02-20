@@ -1,24 +1,18 @@
 "auto";
 auto.waitFor();
 
-var config;
-try {
-    config = require("./config.js");
-} catch (e) {
-    console.error("加载配置失败: " + e);
-    exit();
-}
-
-var PACKAGE = config.packageName;
-var TARGET = config.fudaomao.entryText;
-var REASON_TEXT = config.checkin.reasonText;
-var KEYWORDS = config.trigger.keywords;
-var START_HOUR = config.trigger.startHour;
-var START_MINUTE = config.trigger.startMinute;
-var END_HOUR = config.trigger.endHour;
-var END_MINUTE = config.trigger.endMinute;
-var FALLBACK_HOUR = config.fallback.hour;
-var FALLBACK_MINUTE = config.fallback.minute;
+var CONFIG = {
+    packageName: "com.tencent.wework",
+    reasonText: "离校",
+    entryText: "辅导猫",
+    keywords: ["打卡", "签到", "辅导猫"],
+    startHour: 7,
+    startMinute: 50,
+    endHour: 8,
+    endMinute: 10,
+    fallbackHour: 10,
+    fallbackMinute: 30
+};
 
 var POLL_INTERVAL = 200;
 var MAX_WAIT = 10000;
@@ -48,14 +42,14 @@ function isInTimeRange() {
     var h = now.getHours();
     var m = now.getMinutes();
     var current = h * 60 + m;
-    var start = START_HOUR * 60 + START_MINUTE;
-    var end = END_HOUR * 60 + END_MINUTE;
+    var start = CONFIG.startHour * 60 + CONFIG.startMinute;
+    var end = CONFIG.endHour * 60 + CONFIG.endMinute;
     return current >= start && current <= end;
 }
 
 function isFallbackTime() {
     var now = new Date();
-    return now.getHours() === FALLBACK_HOUR && now.getMinutes() === FALLBACK_MINUTE;
+    return now.getHours() === CONFIG.fallbackHour && now.getMinutes() === CONFIG.fallbackMinute;
 }
 
 function formatTime(h, m) {
@@ -64,30 +58,25 @@ function formatTime(h, m) {
 
 function wakeUp() {
     if (device.isScreenOn()) return true;
-    
     console.log(">>> 唤醒屏幕...");
     device.wakeUp();
     sleep(500);
-    
     if (!device.isScreenOn()) {
         console.log(">>> 唤醒失败");
         return false;
     }
-    
     console.log(">>> 上滑...");
     swipe(device.width / 2, device.height * 0.8, device.width / 2, device.height * 0.3, 300);
     sleep(500);
-    
     return true;
 }
 
-function waitFor(finder, timeout) {
+function waitFor(finder, timeout, globalStart) {
     timeout = timeout || MAX_WAIT;
     var start = Date.now();
-    var globalStart = Date.now();
     while (Date.now() - start < timeout) {
-        if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
-            console.error(">>> 全局超时，强制退出");
+        if (globalStart && Date.now() - globalStart > GLOBAL_TIMEOUT) {
+            console.error(">>> 全局超时");
             return null;
         }
         var result = finder();
@@ -106,7 +95,7 @@ function smartClick(widget) {
     return click(b.centerX(), b.centerY());
 }
 
-function doCheckin() {
+function doCheckin(globalStart) {
     var pageState = waitFor(function() {
         if (textContains("已签到").exists()) return "already_signed";
         var btn = text("范围外签到").findOnce();
@@ -119,7 +108,7 @@ function doCheckin() {
             }
         }
         return null;
-    }, MAX_WAIT);
+    }, MAX_WAIT, globalStart);
     
     if (pageState === "already_signed") {
         console.log(">>> 已签到，跳过");
@@ -134,14 +123,14 @@ function doCheckin() {
     console.log(">>> 点击: " + pageState.btn.text());
     smartClick(pageState.btn);
     
-    var continueBtn = waitFor(function() { return text("继续签到").findOnce(); }, 5000);
+    var continueBtn = waitFor(function() { return text("继续签到").findOnce(); }, 5000, globalStart);
     if (continueBtn) {
         sleep(ANIM_DELAY);
         console.log(">>> 点击: 继续签到");
         smartClick(continueBtn);
     }
     
-    var photoBtn = waitFor(function() { return text("去拍照").findOnce(); }, 5000);
+    var photoBtn = waitFor(function() { return text("去拍照").findOnce(); }, 5000, globalStart);
     if (photoBtn) {
         sleep(ANIM_DELAY);
         console.log(">>> 点击: 去拍照");
@@ -152,7 +141,7 @@ function doCheckin() {
                 var b = w.bounds();
                 return b.width() >= 150 && b.width() <= 200 && Math.abs(b.centerX() - device.width / 2) < 50;
             }).findOnce();
-        }, 5000);
+        }, 5000, globalStart);
         if (shutterBtn) {
             sleep(ANIM_DELAY);
             var b = shutterBtn.bounds();
@@ -160,25 +149,25 @@ function doCheckin() {
             click(b.centerX(), b.centerY());
         }
         
-        var usePhotoBtn = waitFor(function() { return text("使用照片").findOnce(); }, 5000);
+        var usePhotoBtn = waitFor(function() { return text("使用照片").findOnce(); }, 5000, globalStart);
         if (usePhotoBtn) {
             sleep(ANIM_DELAY);
             console.log(">>> 点击: 使用照片");
             smartClick(usePhotoBtn);
         }
         
-        var inputBox = waitFor(function() { return className("EditText").findOnce(); }, 5000);
+        var inputBox = waitFor(function() { return className("EditText").findOnce(); }, 5000, globalStart);
         if (inputBox) {
             sleep(ANIM_DELAY);
-            console.log(">>> 填写: " + REASON_TEXT);
+            console.log(">>> 填写: " + CONFIG.reasonText);
             smartClick(inputBox);
             sleep(300);
-            inputBox.setText(REASON_TEXT);
+            inputBox.setText(CONFIG.reasonText);
             sleep(300);
             back();
         }
         
-        var finalBtn = waitFor(function() { return textContains("完成签到").findOnce(); }, 3000);
+        var finalBtn = waitFor(function() { return textContains("完成签到").findOnce(); }, 3000, globalStart);
         if (finalBtn) {
             sleep(ANIM_DELAY);
             var b = finalBtn.bounds();
@@ -187,7 +176,7 @@ function doCheckin() {
         }
     }
     
-    if (waitFor(function() { return textContains("已签到").exists() ? true : null; }, 5000)) {
+    if (waitFor(function() { return textContains("已签到").exists() ? true : null; }, 5000, globalStart)) {
         console.log(">>> 签到成功！");
         return "success";
     }
@@ -195,28 +184,30 @@ function doCheckin() {
 }
 
 function runCheckinFlow() {
+    var globalStart = Date.now();
+    
     console.log("\n===== 开始签到流程 =====");
     
     console.log(">>> 杀掉企业微信后台...");
     wakeUp();
-    app.openAppSetting(PACKAGE);
+    app.openAppSetting(CONFIG.packageName);
     var forceStopBtn = waitFor(function() {
         return text("强行停止").findOnce() || text("结束运行").findOnce();
-    }, 3000);
+    }, 3000, globalStart);
     if (forceStopBtn && forceStopBtn.clickable()) {
         forceStopBtn.click();
         sleep(300);
-        var confirmBtn = waitFor(function() { return text("确定").findOnce(); }, 2000);
+        var confirmBtn = waitFor(function() { return text("确定").findOnce(); }, 2000, globalStart);
         if (confirmBtn) confirmBtn.click();
     }
     back();
     sleep(300);
     
     console.log(">>> 启动企业微信...");
-    app.launch(PACKAGE);
-    waitForPackage(PACKAGE, 15000);
+    app.launch(CONFIG.packageName);
+    waitForPackage(CONFIG.packageName, 15000);
     
-    var fudaomao = waitFor(function() { return textContains(TARGET).findOnce(); }, 10000);
+    var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000, globalStart);
     if (!fudaomao) {
         console.error(">>> 未找到辅导猫入口");
         return;
@@ -240,6 +231,10 @@ function runCheckinFlow() {
     
     var results = [];
     for (var i = 0; i < activities.length; i++) {
+        if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
+            console.error(">>> 全局超时，退出");
+            break;
+        }
         var activity = activities[i];
         var activityName = activity.text().substring(0, 25);
         console.log("\n===== 活动 " + (i + 1) + "/" + activities.length + ": " + activityName + " =====");
@@ -248,7 +243,7 @@ function runCheckinFlow() {
         
         var result;
         try {
-            result = doCheckin();
+            result = doCheckin(globalStart);
         } catch (e) {
             console.error("签到异常: " + e);
             result = "error";
@@ -264,7 +259,7 @@ function runCheckinFlow() {
             console.log(">>> 活动列表丢失，尝试重新进入辅导猫");
             back();
             sleep(1000);
-            var fudaomao2 = waitFor(function() { return textContains(TARGET).findOnce(); }, 5000);
+            var fudaomao2 = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 5000, globalStart);
             if (fudaomao2) {
                 smartClick(fudaomao2);
                 sleep(2000);
@@ -303,10 +298,10 @@ function triggerCheckin(reason) {
 }
 
 console.log("===== 辅导猫自动签到服务 =====");
-console.log("监听包名: " + PACKAGE);
-console.log("触发关键词: " + KEYWORDS.join(", "));
-console.log("通知触发时段: " + formatTime(START_HOUR, START_MINUTE) + " - " + formatTime(END_HOUR, END_MINUTE));
-console.log("备用定时: " + formatTime(FALLBACK_HOUR, FALLBACK_MINUTE) + " (如通知未触发)");
+console.log("监听包名: " + CONFIG.packageName);
+console.log("触发关键词: " + CONFIG.keywords.join(", "));
+console.log("通知触发时段: " + formatTime(CONFIG.startHour, CONFIG.startMinute) + " - " + formatTime(CONFIG.endHour, CONFIG.endMinute));
+console.log("备用定时: " + formatTime(CONFIG.fallbackHour, CONFIG.fallbackMinute) + " (如通知未触发)");
 console.log("");
 
 events.observeNotification();
@@ -318,7 +313,7 @@ events.on("notification", function(notification) {
     var title = notification.getTitle() || "";
     var text = notification.getText() || "";
     
-    if (pkg !== PACKAGE) return;
+    if (pkg !== CONFIG.packageName) return;
     
     if (!isInTimeRange()) {
         console.log("[忽略] 不在生效时段");
@@ -326,7 +321,7 @@ events.on("notification", function(notification) {
     }
     
     var content = title + " " + text;
-    var matched = KEYWORDS.some(function(kw) {
+    var matched = CONFIG.keywords.some(function(kw) {
         return content.indexOf(kw) >= 0;
     });
     

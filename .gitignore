@@ -8,6 +8,7 @@ AutoJs6-Documentation/
 .idea/
 .vscode/
 *.iml
+.codemap/
 
 # OS
 .DS_Store

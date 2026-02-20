@@ -1,47 +1,30 @@
 "auto";
 auto.waitFor();
 
-var config;
-try {
-    config = require("../config.js");
-} catch (e) {
-    console.error("加载配置失败: " + e);
-    exit();
-}
+var CONFIG = {
+    packageName: "com.tencent.wework",
+    reasonText: "离校",
+    entryText: "辅导猫"
+};
 
-var PACKAGE = config.packageName;
-var TARGET = config.fudaomao.entryText;
-var REASON_TEXT = config.checkin.reasonText;
 var POLL_INTERVAL = 200;
 var MAX_WAIT = 10000;
 var ANIM_DELAY = 500;
 var GLOBAL_TIMEOUT = 180000;
-
-var startTime = Date.now();
-
-function checkTimeout() {
-    if (Date.now() - startTime > GLOBAL_TIMEOUT) {
-        console.error(">>> 全局超时，强制退出");
-        exit();
-    }
-}
+var globalStart = Date.now();
 
 function wakeUp() {
     if (device.isScreenOn()) return true;
-    
     console.log(">>> 唤醒屏幕...");
     device.wakeUp();
     sleep(500);
-    
     if (!device.isScreenOn()) {
         console.log(">>> 唤醒失败");
         return false;
     }
-    
     console.log(">>> 上滑...");
     swipe(device.width / 2, device.height * 0.8, device.width / 2, device.height * 0.3, 300);
     sleep(500);
-    
     return true;
 }
 
@@ -49,7 +32,10 @@ function waitFor(finder, timeout) {
     timeout = timeout || MAX_WAIT;
     var start = Date.now();
     while (Date.now() - start < timeout) {
-        checkTimeout();
+        if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
+            console.error(">>> 全局超时");
+            return null;
+        }
         var result = finder();
         if (result) return result;
         sleep(POLL_INTERVAL);
@@ -130,10 +116,10 @@ function doCheckin() {
         var inputBox = waitFor(function() { return className("EditText").findOnce(); }, 5000);
         if (inputBox) {
             sleep(ANIM_DELAY);
-            console.log(">>> 填写: " + REASON_TEXT);
+            console.log(">>> 填写: " + CONFIG.reasonText);
             smartClick(inputBox);
             sleep(300);
-            inputBox.setText(REASON_TEXT);
+            inputBox.setText(CONFIG.reasonText);
             sleep(300);
             back();
         }
@@ -158,7 +144,7 @@ console.log("===== 手动签到 =====");
 
 console.log(">>> 杀掉企业微信后台...");
 wakeUp();
-app.openAppSetting(PACKAGE);
+app.openAppSetting(CONFIG.packageName);
 var forceStopBtn = waitFor(function() {
     return text("强行停止").findOnce() || text("结束运行").findOnce();
 }, 3000);
@@ -172,10 +158,10 @@ back();
 sleep(300);
 
 console.log(">>> 启动企业微信...");
-app.launch(PACKAGE);
-waitForPackage(PACKAGE, 15000);
+app.launch(CONFIG.packageName);
+waitForPackage(CONFIG.packageName, 15000);
 
-var fudaomao = waitFor(function() { return textContains(TARGET).findOnce(); }, 10000);
+var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000);
 if (!fudaomao) {
     console.error(">>> 未找到辅导猫入口，退出");
     exit();
@@ -199,7 +185,10 @@ if (activities.length === 0) {
 
 var results = [];
 for (var i = 0; i < activities.length; i++) {
-    checkTimeout();
+    if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
+        console.error(">>> 全局超时，退出");
+        break;
+    }
     var activity = activities[i];
     var activityName = activity.text().substring(0, 25);
     console.log("\n===== 活动 " + (i + 1) + "/" + activities.length + ": " + activityName + " =====");
@@ -224,7 +213,7 @@ for (var i = 0; i < activities.length; i++) {
         console.log(">>> 活动列表丢失，尝试重新进入辅导猫");
         back();
         sleep(1000);
-        var fudaomao2 = waitFor(function() { return textContains(TARGET).findOnce(); }, 5000);
+        var fudaomao2 = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 5000);
         if (fudaomao2) {
             smartClick(fudaomao2);
             sleep(2000);

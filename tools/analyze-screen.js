@@ -1,149 +1,160 @@
 "auto";
-// ============================================================
-// 界面分析工具 - 分析当前屏幕所有控件
-// 用途：调试时查看当前页面的控件结构，不执行任何操作
-// ============================================================
-
 auto.waitFor();
 
-// 获取当前 Activity 信息
-var currentActivity = currentActivity();
-var currentPackage = currentPackage();
-
-console.log("========== 当前界面信息 ==========");
-console.log("包名: " + currentPackage);
-console.log("Activity: " + currentActivity);
-console.log("");
-
-// 获取屏幕尺寸
+var pkg = currentPackage();
+var act = currentActivity();
 var dm = context.getResources().getDisplayMetrics();
-console.log("屏幕尺寸: " + dm.widthPixels + " x " + dm.heightPixels);
+
+console.log("================================================================================");
+console.log("                              界面深度分析");
+console.log("================================================================================");
+console.log("");
+console.log("[基本信息]");
+console.log("  包名: " + pkg);
+console.log("  Activity: " + act);
+console.log("  屏幕: " + dm.widthPixels + " x " + dm.heightPixels);
+console.log("  密度: " + dm.density + " (" + dm.densityDpi + " dpi)");
 console.log("");
 
-// ============================================================
-// 1. 查找所有文本控件
-// ============================================================
-console.log("========== 所有文本控件 ==========");
-var allTexts = className("android.widget.TextView").find();
-console.log("找到 " + allTexts.length + " 个 TextView");
-allTexts.forEach(function(item, index) {
-    var t = item.text();
+console.log("================================================================================");
+console.log("[TextView] 文本控件");
+console.log("================================================================================");
+var textViews = className("android.widget.TextView").find();
+var textCount = 0;
+textViews.forEach(function(w) {
+    var t = w.text();
     if (t && t.trim()) {
-        var b = item.bounds();
-        console.log("[" + index + "] 文本: \"" + t + "\"");
-        console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-        console.log("    可点击: " + item.clickable() + ", 可用: " + item.enabled());
+        textCount++;
+        var b = w.bounds();
+        console.log("");
+        console.log("  #" + textCount + " \"" + t + "\"");
+        console.log("     bounds: (" + b.left + "," + b.top + ")-(" + b.right + "," + b.bottom + ")");
+        console.log("     center: (" + b.centerX() + "," + b.centerY() + ")");
+        console.log("     size: " + b.width() + "x" + b.height());
+        console.log("     clickable: " + w.clickable() + ", enabled: " + w.enabled());
     }
 });
 console.log("");
+console.log("  共 " + textCount + " 个有文本的 TextView");
+console.log("");
 
-// ============================================================
-// 2. 查找所有 View 控件（WebView 中的元素通常是 View）
-// ============================================================
-console.log("========== 所有 View 控件（含文本）==========");
-var allViews = className("android.view.View").find();
-var viewsWithText = [];
-allViews.forEach(function(item) {
-    var t = item.text() || item.desc();
+console.log("================================================================================");
+console.log("[View] WebView 内元素");
+console.log("================================================================================");
+var views = className("android.view.View").find();
+var viewCount = 0;
+views.forEach(function(w) {
+    var t = w.text() || w.desc();
     if (t && t.trim()) {
-        viewsWithText.push(item);
-    }
-});
-console.log("找到 " + viewsWithText.length + " 个有文本的 View");
-viewsWithText.forEach(function(item, index) {
-    var t = item.text() || item.desc();
-    var b = item.bounds();
-    console.log("[" + index + "] 文本: \"" + t + "\"");
-    console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-    console.log("    可点击: " + item.clickable() + ", 可用: " + item.enabled());
-    // 检查父控件
-    var p = item.parent();
-    if (p) {
-        console.log("    父控件可点击: " + p.clickable());
+        viewCount++;
+        var b = w.bounds();
+        var p = w.parent();
+        console.log("");
+        console.log("  #" + viewCount + " \"" + t + "\"");
+        console.log("     bounds: (" + b.left + "," + b.top + ")-(" + b.right + "," + b.bottom + ")");
+        console.log("     center: (" + b.centerX() + "," + b.centerY() + ")");
+        console.log("     clickable: " + w.clickable());
+        if (p) {
+            console.log("     parent.clickable: " + p.clickable());
+        }
     }
 });
 console.log("");
+console.log("  共 " + viewCount + " 个有文本的 View");
+console.log("");
 
-// ============================================================
-// 3. 查找所有可点击控件
-// ============================================================
-console.log("========== 所有可点击控件 ==========");
+console.log("================================================================================");
+console.log("[Clickable] 可点击控件");
+console.log("================================================================================");
 var clickables = clickable(true).find();
-console.log("找到 " + clickables.length + " 个可点击控件");
-clickables.forEach(function(item, index) {
-    var t = item.text() || item.desc() || "(无文本)";
-    var b = item.bounds();
-    var cls = item.className();
-    console.log("[" + index + "] " + cls);
-    console.log("    文本: \"" + t + "\"");
-    console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-    console.log("    中心点: (" + b.centerX() + ", " + b.centerY() + ")");
+var clickCount = 0;
+clickables.forEach(function(w) {
+    clickCount++;
+    var t = w.text() || w.desc() || "";
+    var b = w.bounds();
+    var cls = w.className().replace("android.widget.", "").replace("android.view.", "");
+    console.log("");
+    console.log("  #" + clickCount + " [" + cls + "]" + (t ? " \"" + t + "\"" : ""));
+    console.log("     bounds: (" + b.left + "," + b.top + ")-(" + b.right + "," + b.bottom + ")");
+    console.log("     center: (" + b.centerX() + "," + b.centerY() + ")");
 });
 console.log("");
+console.log("  共 " + clickCount + " 个可点击控件");
+console.log("");
 
-// ============================================================
-// 4. 查找输入框
-// ============================================================
-console.log("========== 输入框 ==========");
+console.log("================================================================================");
+console.log("[EditText] 输入框");
+console.log("================================================================================");
 var editTexts = className("android.widget.EditText").find();
-console.log("找到 " + editTexts.length + " 个 EditText");
-editTexts.forEach(function(item, index) {
-    var t = item.text();
-    var b = item.bounds();
-    console.log("[" + index + "] 内容: \"" + t + "\"");
-    console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-    console.log("    focused: " + item.focused());
+if (editTexts.length === 0) {
+    console.log("  (无)");
+} else {
+    editTexts.forEach(function(w, i) {
+        var b = w.bounds();
+        console.log("");
+        console.log("  #" + (i + 1) + " 内容: \"" + w.text() + "\"");
+        console.log("     bounds: (" + b.left + "," + b.top + ")-(" + b.right + "," + b.bottom + ")");
+        console.log("     focused: " + w.focused());
+    });
+}
+console.log("");
+
+console.log("================================================================================");
+console.log("[Button] 按钮");
+console.log("================================================================================");
+var buttons = className("android.widget.Button").find();
+if (buttons.length === 0) {
+    console.log("  (无)");
+} else {
+    buttons.forEach(function(w, i) {
+        var b = w.bounds();
+        console.log("");
+        console.log("  #" + (i + 1) + " \"" + w.text() + "\"");
+        console.log("     bounds: (" + b.left + "," + b.top + ")-(" + b.right + "," + b.bottom + ")");
+        console.log("     center: (" + b.centerX() + "," + b.centerY() + ")");
+        console.log("     clickable: " + w.clickable());
+    });
+}
+console.log("");
+
+console.log("================================================================================");
+console.log("[ImageView] 图片控件 (快门按钮等)");
+console.log("================================================================================");
+var images = className("android.widget.ImageView").find();
+var imgCount = 0;
+images.forEach(function(w) {
+    var b = w.bounds();
+    if (b.width() > 50 && b.height() > 50) {
+        imgCount++;
+        var centerX = b.centerX();
+        var isCenter = Math.abs(centerX - dm.widthPixels / 2) < 100;
+        console.log("");
+        console.log("  #" + imgCount + " " + b.width() + "x" + b.height() + (isCenter ? " [屏幕中央]" : ""));
+        console.log("     bounds: (" + b.left + "," + b.top + ")-(" + b.right + "," + b.bottom + ")");
+        console.log("     center: (" + b.centerX() + "," + b.centerY() + ")");
+        console.log("     clickable: " + w.clickable());
+    }
+});
+console.log("");
+console.log("  共 " + imgCount + " 个大于 50x50 的 ImageView");
+console.log("");
+
+console.log("================================================================================");
+console.log("[关键词搜索]");
+console.log("================================================================================");
+var keywords = ["签到", "完成", "拍照", "使用照片", "继续", "确定", "取消"];
+keywords.forEach(function(kw) {
+    var found = textContains(kw).findOnce();
+    if (found) {
+        var b = found.bounds();
+        console.log("");
+        console.log("  \"" + kw + "\" -> \"" + found.text() + "\"");
+        console.log("     center: (" + b.centerX() + "," + b.centerY() + ")");
+        console.log("     clickable: " + found.clickable());
+    }
 });
 console.log("");
 
-// ============================================================
-// 5. 特别查找：完成签到按钮
-// ============================================================
-console.log("========== 特别查找：完成签到 ==========");
-
-// 方法1：通过 text 查找
-var btn1 = text("完成签到").findOnce();
-if (btn1) {
-    var b = btn1.bounds();
-    console.log("[text] 找到！");
-    console.log("    类名: " + btn1.className());
-    console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-    console.log("    中心点: (" + b.centerX() + ", " + b.centerY() + ")");
-    console.log("    可点击: " + btn1.clickable());
-    var p = btn1.parent();
-    if (p) {
-        var pb = p.bounds();
-        console.log("    父控件: " + p.className() + ", 可点击: " + p.clickable());
-        console.log("    父控件位置: (" + pb.left + ", " + pb.top + ") - (" + pb.right + ", " + pb.bottom + ")");
-    }
-} else {
-    console.log("[text] 未找到");
-}
-
-// 方法2：通过 textContains 查找
-var btn2 = textContains("完成").findOnce();
-if (btn2) {
-    var b = btn2.bounds();
-    console.log("[textContains] 找到: \"" + btn2.text() + "\"");
-    console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-    console.log("    中心点: (" + b.centerX() + ", " + b.centerY() + ")");
-} else {
-    console.log("[textContains] 未找到");
-}
-
-// 方法3：通过 desc 查找
-var btn3 = desc("完成签到").findOnce();
-if (btn3) {
-    var b = btn3.bounds();
-    console.log("[desc] 找到！");
-    console.log("    位置: (" + b.left + ", " + b.top + ") - (" + b.right + ", " + b.bottom + ")");
-} else {
-    console.log("[desc] 未找到");
-}
-
-console.log("");
-console.log("========== 分析完成 ==========");
-console.log("提示：如果键盘遮挡按钮，可以：");
-console.log("1. 使用 back() 收起键盘");
-console.log("2. 点击输入框外的空白区域");
-console.log("3. 直接使用坐标点击（如果按钮位置已知）");
+console.log("================================================================================");
+console.log("                              分析完成");
+console.log("================================================================================");
