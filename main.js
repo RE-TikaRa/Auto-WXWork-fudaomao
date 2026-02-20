@@ -27,46 +27,28 @@ auto.waitFor();
 //   - 关闭省电模式
 // ============================================================================
 
-// 通知 ID - 用于后续更新或取消通知，使用固定值确保可以精确控制
+// 通知 ID - 用于后续更新或取消通知
 var SERVICE_NOTIFICATION_ID = 10086;
 
-// 通知渠道 ID - Android 8.0+ 要求通知必须属于某个渠道
-var SERVICE_CHANNEL_ID = "fudaomao_service";
-
-// 尝试创建前台服务通知（可能在某些环境下不可用）
+// 尝试创建前台服务通知
 try {
-    // 创建通知渠道
-    notice.channel.create(SERVICE_CHANNEL_ID, {
-        name: "辅导猫签到服务",
-        description: "保持签到服务在后台运行",
-        importance: 3,
-        enableVibration: false,
-        enableLights: false
-    });
-    
-    // 发送常驻通知
+    // 使用最简单的方式发送通知
     notice("辅导猫签到服务运行中", {
         title: "辅导猫自动签到",
-        channelId: SERVICE_CHANNEL_ID,
         notificationId: SERVICE_NOTIFICATION_ID,
         isSilent: true,
         autoCancel: false
     });
+    console.log("[服务] 前台通知已创建");
     
     // 注册脚本退出事件，清理通知
     events.on("exit", function() {
         try {
             notice.cancel(SERVICE_NOTIFICATION_ID);
-            console.log("[服务] 通知已清除");
-        } catch (e) {
-            // 忽略清理失败
-        }
+        } catch (e) {}
     });
-    
-    console.log("[服务] 前台通知已创建");
 } catch (e) {
     console.warn("[服务] 无法创建前台通知: " + e);
-    console.warn("[服务] 脚本将继续运行，但可能被系统杀死");
 }
 
 // ============================================================================
