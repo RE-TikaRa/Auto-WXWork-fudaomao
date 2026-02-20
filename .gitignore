@@ -1,0 +1,21 @@
+# Documentation (reference only)
+AutoJs6-Documentation/
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+*.bak
+
+# Release packages
+*.zip
