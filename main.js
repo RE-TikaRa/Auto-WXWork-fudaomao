@@ -20,7 +20,7 @@ function dismissOwnDialogs() {
         try {
             var pkg = currentPackage();
             if (pkg !== "org.autojs.autojs6") break;
-            
+
             for (var i = 0; i < titles.length; i++) {
                 if (text(titles[i]).exists()) {
                     var okBtn = text("确定").findOnce();
@@ -44,7 +44,7 @@ dismissOwnDialogs();
 // ============================================================================
 // 前台服务通知 - 防止 Android 系统杀死脚本
 // ============================================================================
-// 
+//
 // 【问题背景】
 // Android 7.0+ 系统会积极回收后台进程以节省电量和内存。
 // 即使脚本有 setInterval 和 events.observeNotification() 保持运行，
@@ -69,18 +69,8 @@ dismissOwnDialogs();
 
 // 前台服务通知 ID
 var NOTIFICATION_ID = 10086;
+var RESULT_NOTIFICATION_ID = 10087;
 
-/**
- * 刷新前台服务通知
- * 
- * 【作用】
- * 重新发送前台通知，确保通知始终存在。
- * 由于使用相同的 notificationId，不会产生多个通知，只会覆盖/刷新。
- * 
- * 【为什么需要定期刷新】
- * 用户可能手动滑动删除通知，删除后保活机制失效。
- * 定期刷新可以恢复被删除的通知，确保脚本持续受到保护。
- */
 function refreshNotification() {
     try {
         notice({
@@ -88,7 +78,7 @@ function refreshNotification() {
             content: "签到服务运行中",
             notificationId: NOTIFICATION_ID,
             isSilent: true,
-            autoCancel: false
+            autoCancel: false,
         });
         return true;
     } catch (e) {
@@ -102,8 +92,10 @@ if (refreshNotification()) {
     console.log("[服务] 前台通知已创建");
 }
 
-events.on("exit", function() {
-    try { notice.cancel(NOTIFICATION_ID); } catch (e) {}
+events.on("exit", function () {
+    try {
+        notice.cancel(NOTIFICATION_ID);
+    } catch (e) {}
 });
 
 // ============================================================================
@@ -119,48 +111,46 @@ var CONFIG = {
     // -------------------------------------------------------------------------
     // 应用配置
     // -------------------------------------------------------------------------
-    
+
     // 企业微信包名 - 用于启动应用和强制停止
     // 一般无需修改，除非你使用的是特殊版本的企业微信
     packageName: "com.tencent.wework",
-    
+
     // 范围外签到时填写的原因
     // 当你不在签到范围内时，系统会要求填写原因，这里自动填入此文本
     reasonText: "离校",
-    
+
     // 企业微信工作台中辅导猫入口的文本
     // 脚本通过查找包含此文本的控件来定位辅导猫入口
     // 如果你的辅导猫显示名称不同，请修改此值
     entryText: "辅导猫",
-    
+
     // -------------------------------------------------------------------------
     // 通知触发配置
     // -------------------------------------------------------------------------
-    
+
     // 触发关键词列表
     // 当企业微信通知的标题或内容包含以下任一关键词时，触发签到
     // 可以根据实际收到的通知内容添加或修改关键词
     keywords: ["打卡", "签到", "辅导猫"],
-    
+
     // 通知触发生效时段 - 开始时间
     // 只有在此时段内收到的通知才会触发签到
     // 避免在非签到时间被无关通知误触发
-    startHour: 7,      // 小时（24小时制）
-    startMinute: 50,   // 分钟
-    
+    startHour: 7, // 小时（24小时制）
+    startMinute: 50, // 分钟
+
     // 通知触发生效时段 - 结束时间
-    endHour: 8,        // 小时（24小时制）
-    endMinute: 10,     // 分钟
-    
+    endHour: 8, // 小时（24小时制）
+    endMinute: 10, // 分钟
+
     // -------------------------------------------------------------------------
     // 备用定时配置
     // -------------------------------------------------------------------------
-    
-    // 备用定时签到时间
-    // 如果在通知触发时段内没有成功签到（可能是通知被拦截或延迟），
-    // 脚本会在此时间自动执行一次签到作为备用方案
-    fallbackHour: 10,    // 小时（24小时制）
-    fallbackMinute: 30   // 分钟
+
+    // 备用定时签到时间列表（24小时制）
+    // 格式：["HH:mm", "HH:mm"]
+    fallbackTimes: ["10:30", "12:00", "18:00"],
 };
 
 // ============================================================================
@@ -214,77 +204,68 @@ var isRunning = false;
 // 注意：只有签到成功才会设置，失败不会阻止后续尝试
 var todayTriggered = false;
 
-// 备用定时重试计数 - 失败后最多重试 3 次
-var fallbackAttempts = 0;
+// 备用定时重试计数 - 每个时间点失败后最多重试 3 次
 var MAX_FALLBACK_ATTEMPTS = 3;
+var fallbackStates = {};
 
 // 上次检查的日期 - 用于检测日期变化
 // 格式："年-月-日"，如 "2024-1-15"
-// 当日期变化时，重置 todayTriggered 和 fallbackTriggered
+// 当日期变化时，重置 todayTriggered 和 fallbackStates
 var lastCheckedDate = "";
+
+var FALLBACK_TIMES = parseFallbackTimes(CONFIG.fallbackTimes);
 
 // ============================================================================
 // 工具函数 - 时间和日期
 // ============================================================================
 
-/**
- * 获取今天的日期字符串
- * 
- * @returns {string} 格式为 "年-月-日"，如 "2024-1-15"
- * 
- * 【用途】
- * 用于检测日期是否变化，以便在新的一天重置签到标记。
- * 注意：月份和日期不补零，这是为了简化比较逻辑。
- */
 function getTodayStr() {
     var d = new Date();
     return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
 }
 
-/**
- * 重置每日触发标记
- * 
- * 【触发时机】
- * - 每次收到通知时调用
- * - 每次定时器触发时调用
- * 
- * 【作用】
- * 检测日期是否变化，如果是新的一天，则重置：
- * - todayTriggered: 允许新的一天重新签到
- * - fallbackTriggered: 允许新的一天重新触发备用定时
- * 
- * 【为什么需要】
- * 脚本是常驻运行的，跨越午夜时需要自动重置状态，
- * 否则第二天的签到会被错误地跳过。
- */
+function parseFallbackTimes(timeList) {
+    var normalized = [];
+    var seen = {};
+    for (var i = 0; i < timeList.length; i++) {
+        var raw = (timeList[i] || "").trim();
+        var match = raw.match(/^(\d{1,2}):(\d{2})$/);
+        if (!match) continue;
+        var h = parseInt(match[1], 10);
+        var m = parseInt(match[2], 10);
+        if (h < 0 || h > 23 || m < 0 || m > 59) continue;
+        var key = formatTime(h, m);
+        if (seen[key]) continue;
+        seen[key] = true;
+        normalized.push({ time: key, minutes: h * 60 + m });
+    }
+    normalized.sort(function (a, b) {
+        return a.minutes - b.minutes;
+    });
+    return normalized;
+}
+
+function resetFallbackStates() {
+    fallbackStates = {};
+    for (var i = 0; i < FALLBACK_TIMES.length; i++) {
+        fallbackStates[FALLBACK_TIMES[i].time] = {
+            attempts: 0,
+            lastAttemptTs: 0,
+            finished: false,
+        };
+    }
+}
+
 function resetDailyFlag() {
     var today = getTodayStr();
     if (lastCheckedDate !== today) {
         todayTriggered = false;
-        fallbackAttempts = 0;
+        resetFallbackStates();
         lastCheckedDate = today;
         console.log("[日期变更] 重置每日触发标记");
     }
 }
 
-/**
- * 检查当前时间是否在通知触发生效时段内
- * 
- * @returns {boolean} 如果在时段内返回 true
- * 
- * 【时段配置】
- * 由 CONFIG.startHour/startMinute 和 CONFIG.endHour/endMinute 定义
- * 
- * 【计算方法】
- * 将时间转换为"从午夜开始的分钟数"进行比较：
- * - 7:50 = 7*60+50 = 470 分钟
- * - 8:10 = 8*60+10 = 490 分钟
- * - 当前时间在 [470, 490] 范围内则返回 true
- * 
- * 【注意】
- * 此函数不处理跨午夜的时段（如 23:00-01:00），
- * 如需支持请修改比较逻辑。
- */
 function isInTimeRange() {
     var now = new Date();
     var h = now.getHours();
@@ -295,63 +276,82 @@ function isInTimeRange() {
     return current >= start && current <= end;
 }
 
-/**
- * 检查当前时间是否是备用定时触发时间
- * 
- * @returns {boolean} 如果是备用定时时间返回 true
- * 
- * 【触发条件】
- * 当前小时 === CONFIG.fallbackHour 且 当前分钟 === CONFIG.fallbackMinute
- * 
- * 【注意】
- * 由于定时器每 30 秒检查一次，同一分钟内可能多次返回 true，
- * 因此需要配合 fallbackTriggered 标记防止重复触发。
- */
-function isFallbackTime() {
-    var now = new Date();
-    return now.getHours() === CONFIG.fallbackHour && now.getMinutes() === CONFIG.fallbackMinute;
+function formatTime(h, m) {
+    return h.toString().padStart(2, "0") + ":" + m.toString().padStart(2, "0");
 }
 
-/**
- * 格式化时间为 "HH:MM" 格式
- * 
- * @param {number} h - 小时
- * @param {number} m - 分钟
- * @returns {string} 格式化后的时间字符串，如 "07:50"
- * 
- * 【用途】
- * 用于在控制台输出中显示友好的时间格式。
- */
-function formatTime(h, m) {
-    return h.toString().padStart(2, '0') + ":" + m.toString().padStart(2, '0');
+function getFallbackCandidate(nowTs) {
+    var now = new Date(nowTs);
+    var nowMinutes = now.getHours() * 60 + now.getMinutes();
+    for (var i = 0; i < FALLBACK_TIMES.length; i++) {
+        var item = FALLBACK_TIMES[i];
+        if (nowMinutes < item.minutes) continue;
+        var state = fallbackStates[item.time];
+        if (!state || state.finished) continue;
+        if (state.attempts >= MAX_FALLBACK_ATTEMPTS) {
+            state.finished = true;
+            continue;
+        }
+        if (state.lastAttemptTs > 0 && nowTs - state.lastAttemptTs < 30000)
+            continue;
+        return item;
+    }
+    return null;
+}
+
+function sendResultNotification(content) {
+    try {
+        notice({
+            title: "辅导猫签到结果",
+            content: content,
+            notificationId: RESULT_NOTIFICATION_ID,
+            isSilent: false,
+            autoCancel: true,
+        });
+    } catch (e) {
+        console.warn("[通知] 结果通知发送失败: " + e);
+    }
+}
+
+function saveCheckinLog(reason, startedAt, endedAt, summary, results) {
+    try {
+        var datePart =
+            startedAt.getFullYear() +
+            "-" +
+            (startedAt.getMonth() + 1).toString().padStart(2, "0") +
+            "-" +
+            startedAt.getDate().toString().padStart(2, "0");
+        var logDir = files.path("./logs");
+        var logPath = files.join(logDir, "checkin-" + datePart + ".log");
+        files.ensureDir(logPath);
+        var lines = [];
+        lines.push("==== 辅导猫签到日志 ====");
+        lines.push("触发来源: " + reason);
+        lines.push("开始时间: " + startedAt.toLocaleString());
+        lines.push("结束时间: " + endedAt.toLocaleString());
+        lines.push("汇总: " + summary.replace(/\n/g, " | "));
+        if (results && results.length > 0) {
+            lines.push("活动结果:");
+            for (var i = 0; i < results.length; i++) {
+                var item = results[i];
+                var deadline = item.deadline
+                    ? " (截止:" + item.deadline + ")"
+                    : "";
+                lines.push(
+                    "  - " + item.name + deadline + " -> " + item.result,
+                );
+            }
+        }
+        files.append(logPath, lines.join("\n") + "\n\n");
+    } catch (e) {
+        console.warn("[日志] 写入失败: " + e);
+    }
 }
 
 // ============================================================================
 // 工具函数 - 设备操作
 // ============================================================================
 
-/**
- * 唤醒屏幕并解锁
- * 
- * @returns {boolean} 成功返回 true，失败返回 false
- * 
- * 【执行步骤】
- * 1. 检查屏幕是否已亮起，如果是则直接返回 true
- * 2. 调用 device.wakeUp() 唤醒屏幕
- * 3. 等待 500ms 让屏幕完全亮起
- * 4. 再次检查屏幕状态，如果仍未亮起则返回 false
- * 5. 执行上滑手势解锁屏幕
- * 6. 等待 500ms 让解锁动画完成
- * 
- * 【上滑参数】
- * - 起点：屏幕中央水平位置，垂直位置 80%（靠近底部）
- * - 终点：屏幕中央水平位置，垂直位置 30%（靠近顶部）
- * - 持续时间：300ms
- * 
- * 【前提条件】
- * 手机需要设置为无锁屏密码，或使用 Smart Lock 等方式保持解锁状态。
- * 如果有锁屏密码，此函数无法完成解锁。
- */
 function wakeUp() {
     if (device.isScreenOn()) return true;
     console.log(">>> 唤醒屏幕...");
@@ -362,7 +362,13 @@ function wakeUp() {
         return false;
     }
     console.log(">>> 上滑...");
-    swipe(device.width / 2, device.height * 0.8, device.width / 2, device.height * 0.3, 300);
+    swipe(
+        device.width / 2,
+        device.height * 0.8,
+        device.width / 2,
+        device.height * 0.3,
+        300,
+    );
     sleep(500);
     return true;
 }
@@ -371,33 +377,6 @@ function wakeUp() {
 // 工具函数 - UI 等待和点击
 // ============================================================================
 
-/**
- * 等待某个条件满足（轮询模式）
- * 
- * @param {Function} finder - 查找函数，返回非假值表示找到
- * @param {number} [timeout=MAX_WAIT] - 超时时间（毫秒）
- * @param {number} [globalStart] - 全局开始时间戳，用于全局超时检查
- * @returns {*} finder 返回的结果，超时返回 null
- * 
- * 【工作原理】
- * 1. 每隔 POLL_INTERVAL 毫秒调用一次 finder 函数
- * 2. 如果 finder 返回非假值（truthy），立即返回该值
- * 3. 如果超过 timeout 时间仍未找到，返回 null
- * 4. 如果提供了 globalStart，还会检查全局超时
- * 
- * 【为什么用轮询而不是固定延迟】
- * - 轮询可以在元素出现后立即响应，不会浪费时间
- * - 固定延迟可能等待过长（元素早就出现了）或过短（元素还没出现）
- * 
- * 【finder 函数示例】
- * - 查找文本：function() { return text("签到").findOnce(); }
- * - 检查存在：function() { return textContains("已签到").exists() ? true : null; }
- * - 多条件：function() { return text("A").findOnce() || text("B").findOnce(); }
- * 
- * 【全局超时】
- * globalStart 参数用于防止整个签到流程执行过长。
- * 即使单个等待没有超时，如果整体流程超过 GLOBAL_TIMEOUT，也会中止。
- */
 function waitFor(finder, timeout, globalStart) {
     timeout = timeout || MAX_WAIT;
     var start = Date.now();
@@ -413,32 +392,6 @@ function waitFor(finder, timeout, globalStart) {
     return null;
 }
 
-/**
- * 智能点击控件（三级回退策略）
- * 
- * @param {UiObject} widget - 要点击的控件对象
- * @returns {boolean} 点击是否成功
- * 
- * 【三级回退策略】
- * 
- * 第一级：直接点击控件
- * - 如果控件本身 clickable() 为 true，直接调用 widget.click()
- * - 这是最可靠的方式，因为使用了无障碍服务的点击
- * 
- * 第二级：点击父控件
- * - 有些控件本身不可点击，但其父容器可点击
- * - 例如：TextView 在 LinearLayout 中，LinearLayout 设置了点击事件
- * - 此时点击父控件可以触发事件
- * 
- * 第三级：坐标点击
- * - 如果控件和父控件都不可点击，使用坐标点击
- * - 获取控件的边界框，计算中心点坐标，模拟点击
- * - 这是最后的手段，可能不如无障碍点击可靠
- * 
- * 【为什么需要三级回退】
- * 不同应用的 UI 实现方式不同，有些控件虽然视觉上可点击，
- * 但 clickable 属性为 false。通过三级回退可以最大程度保证点击成功。
- */
 function smartClick(widget) {
     if (!widget) return false;
     if (widget.clickable()) return widget.click();
@@ -448,41 +401,70 @@ function smartClick(widget) {
     return click(b.centerX(), b.centerY());
 }
 
-/**
- * 调试：分析当前页面关键信息
- */
 function debugPage(tag) {
     console.log("\n========== [DEBUG] " + tag + " ==========");
-    
+
     try {
         console.log("包名: " + currentPackage());
         console.log("Activity: " + currentActivity());
     } catch (e) {
         console.log("包名/Activity: (远程模式不可用)");
     }
-    
-    var keywords = ["已签到", "未签到", "签到", "范围外签到", "继续签到", "去拍照", "完成签到", "已结束"];
+
+    var keywords = [
+        "已签到",
+        "未签到",
+        "签到",
+        "范围外签到",
+        "继续签到",
+        "去拍照",
+        "完成签到",
+        "已结束",
+    ];
     console.log("\n[关键词检测]");
-    keywords.forEach(function(kw) {
+    keywords.forEach(function (kw) {
         var found = textContains(kw).find();
         if (found.length > 0) {
-            console.log("  ✓ \"" + kw + "\" 找到 " + found.length + " 个");
-            found.forEach(function(w, i) {
+            console.log('  ✓ "' + kw + '" 找到 ' + found.length + " 个");
+            found.forEach(function (w, i) {
                 var b = w.bounds();
-                console.log("    [" + i + "] center:(" + b.centerX() + "," + b.centerY() + ") clickable:" + w.clickable() + " text:\"" + w.text() + "\"");
+                console.log(
+                    "    [" +
+                        i +
+                        "] center:(" +
+                        b.centerX() +
+                        "," +
+                        b.centerY() +
+                        ") clickable:" +
+                        w.clickable() +
+                        ' text:"' +
+                        w.text() +
+                        '"',
+                );
             });
         }
     });
-    
+
     console.log("\n[可点击控件 Y<" + Math.floor(device.height * 0.7) + "]");
     var clickables = selector().clickable(true).find();
     var count = 0;
-    clickables.forEach(function(w) {
+    clickables.forEach(function (w) {
         var b = w.bounds();
         if (b.centerY() < device.height * 0.7 && b.centerY() > 300) {
             count++;
             var t = w.text() || w.desc() || "(无文本)";
-            console.log("  #" + count + " \"" + t + "\" center:(" + b.centerX() + "," + b.centerY() + ") class:" + w.className());
+            console.log(
+                "  #" +
+                    count +
+                    ' "' +
+                    t +
+                    '" center:(' +
+                    b.centerX() +
+                    "," +
+                    b.centerY() +
+                    ") class:" +
+                    w.className(),
+            );
         }
     });
     console.log("========== [/DEBUG] ==========\n");
@@ -492,52 +474,6 @@ function debugPage(tag) {
 // 签到核心逻辑
 // ============================================================================
 
-/**
- * 执行单个活动的签到操作
- * 
- * @param {number} globalStart - 全局开始时间戳，用于超时控制
- * @returns {string} 签到结果：
- *   - "already_signed": 已签到，跳过
- *   - "no_button": 未找到签到按钮
- *   - "success": 签到成功
- *   - "unknown": 未知结果（可能成功也可能失败）
- * 
- * 【签到流程】
- * 
- * 1. 检测页面状态
- *    - 如果显示"已签到"，直接返回 already_signed
- *    - 如果有"范围外签到"按钮，使用该按钮
- *    - 否则查找普通"签到"按钮（通过 Y 坐标过滤排除底部导航栏）
- * 
- * 2. 点击签到按钮
- * 
- * 3. 处理"继续签到"弹窗（如果出现）
- *    - 某些情况下会弹出确认框
- * 
- * 4. 处理拍照流程（如果需要）
- *    a. 点击"去拍照"
- *    b. 处理相机权限弹窗（允许/始终允许/仅在使用中允许）
- *    c. 点击快门按钮（通过尺寸和位置识别）
- *    d. 点击"使用照片"
- *    e. 填写签到原因
- *    f. 收起键盘（调用 back()）
- *    g. 点击"完成签到"
- * 
- * 5. 验证签到结果
- *    - 检查是否出现"已签到"文本
- * 
- * 【签到按钮识别】
- * 通过 Y 坐标过滤签到按钮：
- * - Y > 300: 排除顶部状态栏区域
- * - Y < 屏幕高度 * 0.7: 排除底部导航栏区域
- * 这样可以准确定位页面中央的签到按钮
- * 
- * 【快门按钮识别】
- * 相机界面的快门按钮通常是：
- * - 位于屏幕水平中央（centerX 与屏幕中心相差 < 50px）
- * - 尺寸为屏幕宽度的 10%-20%
- * - 类型为 ImageView
- */
 function doCheckin(globalStart) {
     // -------------------------------------------------------------------------
     // 步骤 1: 等待页面加载，查找签到按钮
@@ -545,40 +481,47 @@ function doCheckin(globalStart) {
     // 只查找签到按钮，不在轮询中检测过期状态
     // 过期检测放到超时后，避免页面加载过程中误判
     // -------------------------------------------------------------------------
-    var pageState = waitFor(function() {
-        // 优先查找"范围外签到"按钮
-        var btn = text("范围外签到").findOnce();
-        if (btn) {
-            var b = btn.bounds();
-            var cls = btn.className();
-            if (cls.indexOf("WebView") < 0 && b.centerY() < device.height * 0.8) {
-                return { btn: btn };
+    var pageState = waitFor(
+        function () {
+            // 优先查找"范围外签到"按钮
+            var btn = text("范围外签到").findOnce();
+            if (btn) {
+                var b = btn.bounds();
+                var cls = btn.className();
+                if (
+                    cls.indexOf("WebView") < 0 &&
+                    b.centerY() < device.height * 0.8
+                ) {
+                    return { btn: btn };
+                }
             }
-        }
-        
-        // 查找普通"签到"按钮
-        var candidates = text("签到").find();
-        for (var i = 0; i < candidates.length; i++) {
-            var cls = candidates[i].className();
-            if (cls.indexOf("WebView") >= 0) continue;
-            var b = candidates[i].bounds();
-            if (b.centerY() < device.height * 0.7 && b.centerY() > 300) {
-                return { btn: candidates[i] };
+
+            // 查找普通"签到"按钮
+            var candidates = text("签到").find();
+            for (var i = 0; i < candidates.length; i++) {
+                var cls = candidates[i].className();
+                if (cls.indexOf("WebView") >= 0) continue;
+                var b = candidates[i].bounds();
+                if (b.centerY() < device.height * 0.7 && b.centerY() > 300) {
+                    return { btn: candidates[i] };
+                }
             }
-        }
-        
-        // 检查是否已签到（这个可以提前返回）
-        if (textContains("已签到").exists()) return "already_signed";
-        
-        return null;
-    }, MAX_WAIT, globalStart);
-    
+
+            // 检查是否已签到（这个可以提前返回）
+            if (textContains("已签到").exists()) return "already_signed";
+
+            return null;
+        },
+        MAX_WAIT,
+        globalStart,
+    );
+
     // 处理检测结果
     if (pageState === "already_signed") {
         console.log(">>> 已签到，跳过");
         return "already_signed";
     }
-    
+
     // 未找到签到按钮时，检查是否过期
     if (!pageState || !pageState.btn) {
         if (text("已结束").exists()) {
@@ -593,24 +536,30 @@ function doCheckin(globalStart) {
         console.log(">>> 未找到签到按钮");
         return "no_button";
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 2: 点击签到按钮
     // -------------------------------------------------------------------------
     sleep(ANIM_DELAY);
     console.log(">>> 点击: " + pageState.btn.text());
     smartClick(pageState.btn);
-    
+
     // -------------------------------------------------------------------------
     // 步骤 3: 处理"继续签到"弹窗（可选）
     // -------------------------------------------------------------------------
-    var continueBtn = waitFor(function() { return text("继续签到").findOnce(); }, 5000, globalStart);
+    var continueBtn = waitFor(
+        function () {
+            return text("继续签到").findOnce();
+        },
+        5000,
+        globalStart,
+    );
     if (continueBtn) {
         sleep(ANIM_DELAY);
         console.log(">>> 点击: 继续签到");
         smartClick(continueBtn);
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 3.5: 处理"未签到"状态
     // -------------------------------------------------------------------------
@@ -625,105 +574,169 @@ function doCheckin(globalStart) {
             var cls = signBtns[i].className();
             // 排除 WebView 容器和底部导航栏（Y > 95%）
             if (cls.indexOf("WebView") >= 0) continue;
-            if (b.centerY() > device.height * 0.8 && b.centerY() < device.height * 0.95) {
+            if (
+                b.centerY() > device.height * 0.8 &&
+                b.centerY() < device.height * 0.95
+            ) {
                 bottomSignBtn = signBtns[i];
                 break;
             }
         }
-        
+
         if (!bottomSignBtn) {
             var outRangeBtn = text("范围外签到").findOnce();
             if (outRangeBtn) {
                 var b = outRangeBtn.bounds();
                 var cls = outRangeBtn.className();
-                if (cls.indexOf("WebView") < 0 && b.centerY() > device.height * 0.8 && b.centerY() < device.height * 0.95) {
+                if (
+                    cls.indexOf("WebView") < 0 &&
+                    b.centerY() > device.height * 0.8 &&
+                    b.centerY() < device.height * 0.95
+                ) {
                     bottomSignBtn = outRangeBtn;
                 }
             }
         }
-        
+
         if (!bottomSignBtn) {
             console.log(">>> 显示未签到但无签到按钮，时间已过期");
             return "missed";
         }
-        
+
         console.log(">>> 点击底部签到按钮");
         sleep(ANIM_DELAY);
-        click(bottomSignBtn.bounds().centerX(), bottomSignBtn.bounds().centerY());
+        click(
+            bottomSignBtn.bounds().centerX(),
+            bottomSignBtn.bounds().centerY(),
+        );
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 4: 处理拍照流程（如果需要）
     // -------------------------------------------------------------------------
-    var photoBtn = waitFor(function() { return text("去拍照").findOnce(); }, 5000, globalStart);
+    var photoBtn = waitFor(
+        function () {
+            return text("去拍照").findOnce();
+        },
+        5000,
+        globalStart,
+    );
     if (photoBtn) {
         sleep(ANIM_DELAY);
         console.log(">>> 点击: 去拍照");
         smartClick(photoBtn);
-        
+
         // 4a. 处理相机权限弹窗
         // 不同系统的权限按钮文本可能不同，需要匹配多种情况
-        var permissionBtn = waitFor(function() {
-            return text("允许").findOnce() || text("始终允许").findOnce() || textContains("仅在使用").findOnce();
-        }, 2000, globalStart);
+        var permissionBtn = waitFor(
+            function () {
+                return (
+                    text("允许").findOnce() ||
+                    text("始终允许").findOnce() ||
+                    textContains("仅在使用").findOnce()
+                );
+            },
+            2000,
+            globalStart,
+        );
         if (permissionBtn) {
             console.log(">>> 处理权限弹窗");
             smartClick(permissionBtn);
             sleep(500);
         }
-        
+
         // 4b. 点击快门按钮
         // 通过尺寸和位置识别快门按钮（屏幕中央的圆形按钮）
-        var shutterBtn = waitFor(function() {
-            var minSize = device.width * 0.1;  // 最小尺寸：屏幕宽度的 10%
-            var maxSize = device.width * 0.2;  // 最大尺寸：屏幕宽度的 20%
-            return className("android.widget.ImageView").filter(function(w) {
-                var b = w.bounds();
-                // 条件：尺寸在范围内，且水平位置接近屏幕中央
-                return b.width() >= minSize && b.width() <= maxSize && Math.abs(b.centerX() - device.width / 2) < 50;
-            }).findOnce();
-        }, 5000, globalStart);
+        var shutterBtn = waitFor(
+            function () {
+                var minSize = device.width * 0.1; // 最小尺寸：屏幕宽度的 10%
+                var maxSize = device.width * 0.2; // 最大尺寸：屏幕宽度的 20%
+                return className("android.widget.ImageView")
+                    .filter(function (w) {
+                        var b = w.bounds();
+                        // 条件：尺寸在范围内，且水平位置接近屏幕中央
+                        return (
+                            b.width() >= minSize &&
+                            b.width() <= maxSize &&
+                            Math.abs(b.centerX() - device.width / 2) < 50
+                        );
+                    })
+                    .findOnce();
+            },
+            5000,
+            globalStart,
+        );
         if (shutterBtn) {
             sleep(ANIM_DELAY);
             var b = shutterBtn.bounds();
-            console.log(">>> 点击快门: (" + b.centerX() + ", " + b.centerY() + ")");
+            console.log(
+                ">>> 点击快门: (" + b.centerX() + ", " + b.centerY() + ")",
+            );
             click(b.centerX(), b.centerY());
         }
-        
+
         // 4c. 点击"使用照片"
-        var usePhotoBtn = waitFor(function() { return text("使用照片").findOnce(); }, 5000, globalStart);
+        var usePhotoBtn = waitFor(
+            function () {
+                return text("使用照片").findOnce();
+            },
+            5000,
+            globalStart,
+        );
         if (usePhotoBtn) {
             sleep(ANIM_DELAY);
             console.log(">>> 点击: 使用照片");
             smartClick(usePhotoBtn);
         }
-        
+
         // 4d. 填写签到原因
-        var inputBox = waitFor(function() { return className("EditText").findOnce(); }, 5000, globalStart);
+        var inputBox = waitFor(
+            function () {
+                return className("EditText").findOnce();
+            },
+            5000,
+            globalStart,
+        );
         if (inputBox) {
             sleep(ANIM_DELAY);
             console.log(">>> 填写: " + CONFIG.reasonText);
-            smartClick(inputBox);  // 先点击输入框获取焦点
+            smartClick(inputBox); // 先点击输入框获取焦点
             sleep(300);
-            inputBox.setText(CONFIG.reasonText);  // 设置文本
+            inputBox.setText(CONFIG.reasonText); // 设置文本
             sleep(300);
-            back();  // 收起键盘，否则可能遮挡"完成签到"按钮
+            back(); // 收起键盘，否则可能遮挡"完成签到"按钮
         }
-        
+
         // 4e. 点击"完成签到"
-        var finalBtn = waitFor(function() { return textContains("完成签到").findOnce(); }, 3000, globalStart);
+        var finalBtn = waitFor(
+            function () {
+                return textContains("完成签到").findOnce();
+            },
+            3000,
+            globalStart,
+        );
         if (finalBtn) {
             sleep(ANIM_DELAY);
             var b = finalBtn.bounds();
-            console.log(">>> 点击完成签到: (" + b.centerX() + ", " + b.centerY() + ")");
+            console.log(
+                ">>> 点击完成签到: (" + b.centerX() + ", " + b.centerY() + ")",
+            );
             click(b.centerX(), b.centerY());
         }
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 5: 验证签到结果
     // -------------------------------------------------------------------------
-    if (waitFor(function() { return textContains("已签到").exists() ? true : null; }, 5000, globalStart)) {
+    if (
+        waitFor(
+            function () {
+                return textContains("已签到").exists() ? true : null;
+            },
+            5000,
+            globalStart,
+        )
+    ) {
         console.log(">>> 签到成功！");
         return "success";
     }
@@ -734,82 +747,73 @@ function doCheckin(globalStart) {
 // 签到流程控制
 // ============================================================================
 
-/**
- * 执行完整的签到流程
- * 
- * @returns {boolean} 是否有至少一个活动签到成功
- * 
- * 【完整流程】
- * 
- * 1. 唤醒屏幕并解锁
- * 
- * 2. 杀掉企业微信后台
- *    - 打开应用设置页面
- *    - 点击"强行停止"或"结束运行"
- *    - 确认停止
- *    - 这样做是为了确保企业微信从干净状态启动，避免页面状态异常
- * 
- * 3. 启动企业微信
- *    - 等待应用完全启动（检测到辅导猫入口或工作台）
- * 
- * 4. 进入辅导猫
- *    - 查找并点击辅导猫入口
- * 
- * 5. 查找今日活动
- *    - 通过日期文本（如"01月15日"）查找今日的签到活动
- * 
- * 6. 遍历处理每个活动
- *    - 使用 while 循环，每次处理第一个活动
- *    - 这样做是因为签到后活动可能从列表中消失，使用索引会错位
- *    - 每个活动调用 doCheckin() 执行签到
- *    - 签到后返回活动列表，刷新活动列表
- * 
- * 7. 输出结果汇总
- * 
- * 【为什么要杀掉企业微信后台】
- * 企业微信可能停留在某个页面（如聊天界面），直接启动可能无法
- * 正确导航到辅导猫。强制停止后重新启动可以确保从主界面开始。
- * 
- * 【活动列表丢失处理】
- * 签到完成后返回时，如果活动列表为空（可能是页面刷新或导航问题），
- * 会尝试返回上一级并重新进入辅导猫页面。
- */
-function runCheckinFlow() {
+function runCheckinFlow(triggerReason) {
     // 记录流程开始时间，用于全局超时控制
     var globalStart = Date.now();
-    
+    var startedAt = new Date();
+    var reason = triggerReason || "未知触发";
+
+    function finishFlow(hasSuccess, summary, results) {
+        sendResultNotification(summary.split("\n").slice(0, 4).join(" | "));
+        saveCheckinLog(reason, startedAt, new Date(), summary, results || []);
+        return hasSuccess;
+    }
+
     console.log("\n===== 开始签到流程 =====");
-    
+
     // -------------------------------------------------------------------------
     // 步骤 1: 唤醒屏幕
     // -------------------------------------------------------------------------
     if (!wakeUp()) {
         console.error(">>> 唤醒失败");
-        return false;
+        return finishFlow(
+            false,
+            "成功: 0\n已签到: 0\n错过签到: 0\n失败: 1\n\n失败活动:\n唤醒屏幕失败",
+            [],
+        );
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 2-3: 杀掉企业微信后台并启动（最多重试3次）
     // -------------------------------------------------------------------------
     var MAX_LAUNCH_RETRIES = 3;
     var appLaunched = false;
-    
+
     for (var retry = 1; retry <= MAX_LAUNCH_RETRIES; retry++) {
-        console.log(">>> 尝试启动企业微信 (" + retry + "/" + MAX_LAUNCH_RETRIES + ")");
-        
+        console.log(
+            ">>> 尝试启动企业微信 (" + retry + "/" + MAX_LAUNCH_RETRIES + ")",
+        );
+
         // 杀掉后台
         console.log(">>> 杀掉企业微信后台...");
         app.openAppSetting(CONFIG.packageName);
-        var forceStopBtn = waitFor(function() {
-            return text("强行停止").findOnce() || text("结束运行").findOnce();
-        }, 3000, globalStart);
-        
+        var forceStopBtn = waitFor(
+            function () {
+                return (
+                    text("强行停止").findOnce() || text("结束运行").findOnce()
+                );
+            },
+            3000,
+            globalStart,
+        );
+
         if (forceStopBtn) {
-            console.log(">>> 找到停止按钮: " + forceStopBtn.text() + ", clickable=" + forceStopBtn.clickable());
+            console.log(
+                ">>> 找到停止按钮: " +
+                    forceStopBtn.text() +
+                    ", clickable=" +
+                    forceStopBtn.clickable(),
+            );
             if (forceStopBtn.clickable()) {
                 forceStopBtn.click();
                 sleep(300);
-                var confirmBtn = waitFor(function() { return text("确定").findOnce(); }, 2000, globalStart);
+                var confirmBtn = waitFor(
+                    function () {
+                        return text("确定").findOnce();
+                    },
+                    2000,
+                    globalStart,
+                );
                 if (confirmBtn) {
                     console.log(">>> 点击确定");
                     confirmBtn.click();
@@ -821,25 +825,39 @@ function runCheckinFlow() {
         } else {
             console.log(">>> 未找到停止按钮");
         }
-        
+
         home();
         sleep(500);
-        
+
         // 启动企业微信
         console.log(">>> 启动企业微信...");
         app.launch(CONFIG.packageName);
         sleep(3000);
-        
+
         // 检测是否成功启动（超时30秒）
-        appLaunched = waitFor(function() { 
-            return textContains(CONFIG.entryText).exists() || textContains("工作台").exists(); 
-        }, 30000, globalStart);
-        
+        appLaunched = waitFor(
+            function () {
+                return (
+                    textContains(CONFIG.entryText).exists() ||
+                    textContains("工作台").exists()
+                );
+            },
+            30000,
+            globalStart,
+        );
+
         if (appLaunched) {
             console.log(">>> 企业微信启动成功");
-            
+
             // 确保回到消息页（点击底部"消息"tab）
-            var msgTab = text("消息").boundsInside(0, device.height * 0.9, device.width, device.height).findOnce();
+            var msgTab = text("消息")
+                .boundsInside(
+                    0,
+                    device.height * 0.9,
+                    device.width,
+                    device.height,
+                )
+                .findOnce();
             if (msgTab) {
                 console.log(">>> 点击消息tab确保在首页");
                 click(msgTab.bounds().centerX(), msgTab.bounds().centerY());
@@ -847,80 +865,111 @@ function runCheckinFlow() {
             }
             break;
         }
-        
+
         console.warn(">>> 启动超时，准备重试...");
     }
-    
+
     if (!appLaunched) {
-        console.error(">>> 企业微信启动失败，已重试 " + MAX_LAUNCH_RETRIES + " 次");
+        console.error(
+            ">>> 企业微信启动失败，已重试 " + MAX_LAUNCH_RETRIES + " 次",
+        );
         debugPage("企业微信启动失败");
         toast("企业微信启动失败");
         alert("签到失败", "企业微信启动超时，请检查应用状态");
-        return false;
+        return finishFlow(
+            false,
+            "成功: 0\n已签到: 0\n错过签到: 0\n失败: 1\n\n失败活动:\n企业微信启动超时",
+            [],
+        );
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 4: 进入辅导猫（带重试）
     // -------------------------------------------------------------------------
     var MAX_PAGE_RETRIES = 2;
     var activities = null;
     var today = new Date();
-    var todayStr = (today.getMonth() + 1).toString().padStart(2, '0') + "月" + 
-                   today.getDate().toString().padStart(2, '0') + "日";
+    var todayStr =
+        (today.getMonth() + 1).toString().padStart(2, "0") +
+        "月" +
+        today.getDate().toString().padStart(2, "0") +
+        "日";
     console.log(">>> 今天: " + todayStr);
-    
+
     for (var pageRetry = 1; pageRetry <= MAX_PAGE_RETRIES; pageRetry++) {
-        var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000, globalStart);
+        var fudaomao = waitFor(
+            function () {
+                return textContains(CONFIG.entryText).findOnce();
+            },
+            10000,
+            globalStart,
+        );
         if (!fudaomao) {
             console.error(">>> 未找到辅导猫入口");
             debugPage("未找到辅导猫入口");
-            return false;
+            return finishFlow(
+                false,
+                "成功: 0\n已签到: 0\n错过签到: 0\n失败: 1\n\n失败活动:\n未找到辅导猫入口",
+                [],
+            );
         }
-        console.log(">>> 点击: 辅导猫 (尝试 " + pageRetry + "/" + MAX_PAGE_RETRIES + ")");
+        console.log(
+            ">>> 点击: 辅导猫 (尝试 " +
+                pageRetry +
+                "/" +
+                MAX_PAGE_RETRIES +
+                ")",
+        );
         smartClick(fudaomao);
-        
+
         sleep(2000);
         activities = textContains(todayStr).find();
         console.log(">>> 找到 " + activities.length + " 个今日活动");
-        
+
         if (activities.length > 0) break;
-        
+
         if (pageRetry < MAX_PAGE_RETRIES) {
             console.log(">>> 页面加载失败，返回重试...");
             back();
             sleep(1000);
         }
     }
-    
+
     if (!activities || activities.length === 0) {
         console.log(">>> 没有今日活动");
         debugPage("没有今日活动");
         toast("没有今日活动");
         alert("签到完成", "今日没有需要签到的活动");
-        return false;
+        return finishFlow(
+            false,
+            "成功: 0\n已签到: 0\n错过签到: 0\n失败: 0",
+            [],
+        );
     }
-    
+
     // -------------------------------------------------------------------------
-    // 步骤 5: 预扫描生成待签到列表（根据截止时间过滤已过期活动）
+    // 步骤 5: 预扫描生成待签到列表（解析并标记截止时间）
     // -------------------------------------------------------------------------
     var todoList = [];
     var now = new Date();
     console.log(">>> 当前时间: " + now.toLocaleString());
-    
+
     for (var i = 0; i < activities.length; i++) {
         var act = activities[i];
         var fullText = act.text() || "";
         var b = act.bounds();
-        
+
         // 解析活动名称（第一行）和截止时间
         var lines = fullText.split("\n");
         var activityName = lines[0] || "";
-        
+
         // 解析截止时间（格式：签到截止时间：2026年02月21日 22:00）
-        var deadlineMatch = fullText.match(/签到截止时间[：:]\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/);
+        var deadlineMatch = fullText.match(
+            /签到截止时间[：:]\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/,
+        );
         var isExpired = false;
         var deadlineStr = "";
-        
+
         if (deadlineMatch) {
             var year = parseInt(deadlineMatch[1]);
             var month = parseInt(deadlineMatch[2]) - 1;
@@ -928,57 +977,79 @@ function runCheckinFlow() {
             var hour = parseInt(deadlineMatch[4]);
             var minute = parseInt(deadlineMatch[5]);
             var deadline = new Date(year, month, day, hour, minute);
-            deadlineStr = month + 1 + "/" + day + " " + hour + ":" + (minute < 10 ? "0" + minute : minute);
+            deadlineStr =
+                month +
+                1 +
+                "/" +
+                day +
+                " " +
+                hour +
+                ":" +
+                (minute < 10 ? "0" + minute : minute);
             isExpired = now > deadline;
         }
-        
+
         todoList.push({
             name: activityName,
             fullText: fullText.substring(0, 50),
             centerY: b.centerY(),
             isExpired: isExpired,
-            deadlineStr: deadlineStr
+            deadlineStr: deadlineStr,
         });
     }
-    
+
     console.log("\n===== 待签到列表 =====");
     var validCount = 0;
-    todoList.forEach(function(item, idx) {
+    todoList.forEach(function (item, idx) {
         var status = item.isExpired ? "[已过期]" : "[待处理]";
         if (!item.isExpired) validCount++;
-        var deadline = item.deadlineStr ? " (截止:" + item.deadlineStr + ")" : "";
-        console.log((idx + 1) + ". " + status + " " + item.name + deadline);
+        var deadline = item.deadlineStr
+            ? " (截止:" + item.deadlineStr + ")"
+            : "";
+        console.log(idx + 1 + ". " + status + " " + item.name + deadline);
     });
     console.log("有效活动: " + validCount + "/" + todoList.length);
     console.log("======================\n");
-    
+
     // -------------------------------------------------------------------------
     // 步骤 6: 按列表顺序处理每个活动
     // -------------------------------------------------------------------------
     var results = [];
-    var processedNames = {};  // 已处理的活动名称集合
+    var processedNames = {}; // 已处理的活动名称集合
     var hasSuccess = false;
-    
+
     for (var todoIdx = 0; todoIdx < todoList.length; todoIdx++) {
         if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
             console.error(">>> 全局超时，退出");
             break;
         }
-        
+
         var todoItem = todoList[todoIdx];
-        
+
         // 跳过已处理的活动（按名称去重）
         if (processedNames[todoItem.name]) {
             console.log(">>> 跳过已处理: " + todoItem.name);
             continue;
         }
         processedNames[todoItem.name] = true;
-        
-        console.log("\n===== 活动 " + (todoIdx + 1) + "/" + todoList.length + ": " + todoItem.name + " =====");
+
+        console.log(
+            "\n===== 活动 " +
+                (todoIdx + 1) +
+                "/" +
+                todoList.length +
+                ": " +
+                todoItem.name +
+                " =====",
+        );
         if (todoItem.isExpired) {
-            console.log(">>> 截止时间已过 (" + todoItem.deadlineStr + ")，检查是否已签到...");
+            console.log(
+                ">>> 截止时间已过 (" +
+                    todoItem.deadlineStr +
+                    ")，检查是否已签到...",
+            );
         }
-        
+
         // 重新查找活动（页面可能已刷新）
         var activity = null;
         var currentActivities = textContains(todayStr).find();
@@ -989,17 +1060,21 @@ function runCheckinFlow() {
                 break;
             }
         }
-        
+
         if (!activity) {
             console.log(">>> 活动已消失，跳过");
-            results.push({ name: todoItem.name, deadline: todoItem.deadlineStr, result: "not_found" });
+            results.push({
+                name: todoItem.name,
+                deadline: todoItem.deadlineStr,
+                result: "not_found",
+            });
             continue;
         }
-        
+
         // 点击进入活动详情
         console.log(">>> 点击活动: Y=" + activity.bounds().centerY());
         smartClick(activity);
-        
+
         // 执行签到
         var result;
         try {
@@ -1009,20 +1084,24 @@ function runCheckinFlow() {
             console.error("签到异常: " + e);
             result = "error";
         }
-        
+
         // 失败时分析当前页面
         if (result !== "success" && result !== "already_signed") {
             debugPage("签到失败 - " + result);
         }
-        
-        results.push({ name: todoItem.name, deadline: todoItem.deadlineStr, result: result });
-        
+
+        results.push({
+            name: todoItem.name,
+            deadline: todoItem.deadlineStr,
+            result: result,
+        });
+
         // 返回活动列表
         console.log(">>> 返回");
         back();
         sleep(1000);
     }
-    
+
     // -------------------------------------------------------------------------
     // 步骤 7: 输出结果汇总
     // -------------------------------------------------------------------------
@@ -1033,31 +1112,43 @@ function runCheckinFlow() {
     var missedCount = 0;
     var failedNames = [];
     var missedNames = [];
-    
-    results.forEach(function(r, idx) {
+
+    results.forEach(function (r, idx) {
         var deadline = r.deadline ? " (截止:" + r.deadline + ")" : "";
-        console.log((idx + 1) + ". " + r.name + deadline + " -> " + r.result);
+        console.log(idx + 1 + ". " + r.name + deadline + " -> " + r.result);
         if (r.result === "success") successCount++;
         else if (r.result === "already_signed") skipCount++;
         else if (r.result === "missed") {
             missedCount++;
-            missedNames.push(r.name + (r.deadline ? "\n  截止:" + r.deadline : ""));
+            missedNames.push(
+                r.name + (r.deadline ? "\n  截止:" + r.deadline : ""),
+            );
         } else {
             failCount++;
-            failedNames.push(r.name + (r.deadline ? "\n  截止:" + r.deadline : ""));
+            failedNames.push(
+                r.name + (r.deadline ? "\n  截止:" + r.deadline : ""),
+            );
         }
     });
     console.log("===== 签到流程结束 =====\n");
-    
+
     // 弹窗显示结果
-    var summary = "成功: " + successCount + "\n已签到: " + skipCount + "\n错过签到: " + missedCount + "\n失败: " + failCount;
+    var summary =
+        "成功: " +
+        successCount +
+        "\n已签到: " +
+        skipCount +
+        "\n错过签到: " +
+        missedCount +
+        "\n失败: " +
+        failCount;
     if (missedCount > 0) {
         summary += "\n\n错过签到:\n" + missedNames.join("\n");
     }
     if (failCount > 0) {
         summary += "\n\n失败活动:\n" + failedNames.join("\n");
     }
-    
+
     if (failCount === 0 && missedCount === 0) {
         toast("签到完成！");
         alert("签到完成", summary);
@@ -1065,47 +1156,31 @@ function runCheckinFlow() {
         toast("签到有异常，请检查");
         alert("签到结果", summary);
     }
-    
-    return hasSuccess;
+
+    return finishFlow(hasSuccess, summary, results);
 }
 
-/**
- * 触发签到（带运行锁保护）
- * 
- * @param {string} reason - 触发原因，用于日志记录（如"通知触发"、"备用定时"）
- * @returns {boolean} 签到是否成功
- * 
- * 【运行锁机制】
- * 使用 isRunning 变量作为运行锁，防止签到流程并发执行。
- * 
- * 场景：用户可能在短时间内收到多条通知，如果不加锁，
- * 每条通知都会触发一次签到流程，导致混乱。
- * 
- * 【成功标记】
- * 只有签到成功（hasSuccess = true）才会设置 todayTriggered = true。
- * 这样如果签到失败，备用定时仍然会尝试签到。
- */
 function triggerCheckin(reason) {
     // 检查运行锁
     if (isRunning) {
         console.log("[忽略] 签到流程正在运行中");
         return false;
     }
-    
+
     console.log("\n[" + reason + "] " + new Date().toLocaleString());
-    
+
     // 获取运行锁
     isRunning = true;
-    
+
     var success = false;
     try {
-        success = runCheckinFlow();
+        success = runCheckinFlow(reason);
         // 只有成功才标记今日已触发
         if (success) todayTriggered = true;
     } catch (e) {
         console.error("签到流程异常: " + e);
     }
-    
+
     // 释放运行锁
     isRunning = false;
     console.log(">>> 签到流程锁已释放");
@@ -1119,9 +1194,22 @@ function triggerCheckin(reason) {
 console.log("===== 辅导猫自动签到服务 =====");
 console.log("监听包名: " + CONFIG.packageName);
 console.log("触发关键词: " + CONFIG.keywords.join(", "));
-console.log("通知触发时段: " + formatTime(CONFIG.startHour, CONFIG.startMinute) + " - " + formatTime(CONFIG.endHour, CONFIG.endMinute));
-console.log("备用定时: " + formatTime(CONFIG.fallbackHour, CONFIG.fallbackMinute) + " (如通知未触发)");
+console.log(
+    "通知触发时段: " +
+        formatTime(CONFIG.startHour, CONFIG.startMinute) +
+        " - " +
+        formatTime(CONFIG.endHour, CONFIG.endMinute),
+);
+console.log(
+    "备用定时: " +
+        FALLBACK_TIMES.map(function (item) {
+            return item.time;
+        }).join(", ") +
+        " (如通知未触发)",
+);
 console.log("");
+
+resetDailyFlag();
 
 // ============================================================================
 // 通知监听
@@ -1144,51 +1232,39 @@ console.log("");
 
 events.observeNotification();
 
-/**
- * 通知事件处理函数
- * 
- * @param {Notification} notification - 通知对象，包含包名、标题、内容等信息
- * 
- * 【处理流程】
- * 1. 重置每日标记（检测日期变化）
- * 2. 检查包名是否为企业微信
- * 3. 检查是否在生效时段内
- * 4. 检查是否匹配关键词
- * 5. 如果全部通过，触发签到
- */
-events.on("notification", function(notification) {
+events.on("notification", function (notification) {
     // 每次收到通知时检查日期是否变化
     resetDailyFlag();
-    
+
     // 获取通知信息
     var pkg = notification.getPackageName();
     var title = notification.getTitle() || "";
     var notificationText = notification.getText() || "";
-    
+
     // 过滤条件 1: 包名必须是企业微信
     if (pkg !== CONFIG.packageName) return;
-    
+
     // 过滤条件 2: 必须在生效时段内
     if (!isInTimeRange()) {
         console.log("[忽略] 不在生效时段");
         return;
     }
-    
+
     // 过滤条件 3: 必须匹配关键词
     var content = title + " " + notificationText;
-    var matched = CONFIG.keywords.some(function(kw) {
+    var matched = CONFIG.keywords.some(function (kw) {
         return content.indexOf(kw) >= 0;
     });
-    
+
     if (!matched) {
         console.log("[忽略] 不匹配关键词: " + content.substring(0, 30));
         return;
     }
-    
+
     // 所有条件通过，触发签到（在子线程中执行，避免 UI 线程阻塞）
     console.log("  标题: " + title);
     console.log("  内容: " + notificationText);
-    threads.start(function() {
+    threads.start(function () {
         triggerCheckin("通知触发");
     });
 });
@@ -1207,29 +1283,40 @@ events.on("notification", function(notification) {
 // 备用定时作为保底方案，在指定时间自动执行签到。
 //
 // 【触发条件】
-// 同时满足以下三个条件时触发：
 // 1. todayTriggered === false（今天还没有成功签到）
-// 2. fallbackTriggered === false（今天备用定时还没有执行过）
-// 3. isFallbackTime() === true（当前时间是备用定时时间）
+// 2. 当前时间 >= 某个备用时间点
+// 3. 该时间点重试次数 < MAX_FALLBACK_ATTEMPTS
 //
 // 【定时器间隔】
-// 每 30 秒检查一次，确保不会错过备用定时时间。
-// 由于检查间隔是 30 秒，同一分钟内可能检查 2 次，
-// 因此需要 fallbackTriggered 标记防止重复触发。
+// 每 30 秒检查一次。命中备用时间点后按 30 秒间隔重试，
+// 每个时间点最多重试 MAX_FALLBACK_ATTEMPTS 次。
 // ============================================================================
 
 console.log("监听中... (保持脚本运行)");
 
-setInterval(function() {
+setInterval(function () {
     resetDailyFlag();
     refreshNotification();
-    
-    if (!todayTriggered && fallbackAttempts < MAX_FALLBACK_ATTEMPTS && isFallbackTime()) {
-        fallbackAttempts++;
-        console.log("[备用定时] 尝试 " + fallbackAttempts + "/" + MAX_FALLBACK_ATTEMPTS);
-        var success = triggerCheckin("备用定时");
-        if (success) {
-            fallbackAttempts = MAX_FALLBACK_ATTEMPTS;
+
+    if (!todayTriggered) {
+        var nowTs = Date.now();
+        var candidate = getFallbackCandidate(nowTs);
+        if (candidate) {
+            var state = fallbackStates[candidate.time];
+            state.attempts++;
+            state.lastAttemptTs = nowTs;
+            console.log(
+                "[备用定时 " +
+                    candidate.time +
+                    "] 尝试 " +
+                    state.attempts +
+                    "/" +
+                    MAX_FALLBACK_ATTEMPTS,
+            );
+            var success = triggerCheckin("备用定时(" + candidate.time + ")");
+            if (success || state.attempts >= MAX_FALLBACK_ATTEMPTS) {
+                state.finished = true;
+            }
         }
     }
 }, 30000);
