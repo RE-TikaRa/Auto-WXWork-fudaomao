@@ -32,6 +32,36 @@ try {
     exit();
 }
 
+// 关闭上次运行遗留的弹窗（仅限本脚本的 alert 弹窗）
+function dismissOwnDialogs() {
+    var titles = ["签到完成", "签到失败", "签到结果"];
+    var dismissed = 0;
+    for (var round = 0; round < 5; round++) {
+        var found = false;
+        try {
+            var pkg = currentPackage();
+            if (pkg !== "org.autojs.autojs6") break;
+            
+            for (var i = 0; i < titles.length; i++) {
+                if (text(titles[i]).exists()) {
+                    var okBtn = text("确定").findOnce();
+                    if (okBtn && okBtn.clickable()) {
+                        console.log(">>> 关闭遗留弹窗: " + titles[i]);
+                        okBtn.click();
+                        sleep(500);
+                        dismissed++;
+                        found = true;
+                    }
+                    break;
+                }
+            }
+        } catch (e) {}
+        if (!found) break;
+    }
+    return dismissed;
+}
+dismissOwnDialogs();
+
 // ============================================================================
 // 配置
 // ============================================================================
@@ -268,14 +298,14 @@ function doCheckin() {
     
     // 未找到签到按钮时，检查是否过期
     if (!pageState || !pageState.btn) {
-        // 再次检查过期状态（此时页面应该已加载完成）
         if (text("已结束").exists()) {
             console.log(">>> 活动已结束");
-            return "time_expired";
+            return "missed";
         }
-        if (textContains("为何不能签到").exists()) {
-            console.log(">>> 签到时间已过期");
-            return "time_expired";
+        // 显示"未签到"但没有签到按钮 = 已过期未签到
+        if (textContains("未签到").exists()) {
+            console.log(">>> 已过期未签到（无签到按钮）");
+            return "missed";
         }
         console.log(">>> 未找到签到按钮");
         return "no_button";
@@ -310,12 +340,8 @@ function doCheckin() {
     // ========================================================================
     // 第 4.5 步：检测签到时间是否已过期
     // ========================================================================
-    // 点击签到按钮后，如果显示"为何不能签到？"说明已过签到时段
+    // 注意："为何不能签到？"是页面上的固定链接，不能作为过期判断依据
     // ========================================================================
-    if (textContains("为何不能签到").exists()) {
-        console.log(">>> 检测到\"为何不能签到？\"，时间已过期");
-        return "time_expired";
-    }
     
     // 如果显示"未签到"，查找底部可点击的签到按钮
     if (textContains("未签到").exists()) {
@@ -346,7 +372,7 @@ function doCheckin() {
         
         if (!bottomSignBtn) {
             console.log(">>> 显示未签到但无签到按钮，时间已过期");
-            return "time_expired";
+            return "missed";
         }
         
         console.log(">>> 点击底部签到按钮: Y=" + bottomSignBtn.bounds().centerY());
@@ -583,6 +609,7 @@ for (var retry = 1; retry <= MAX_LAUNCH_RETRIES; retry++) {
 
 if (!appLaunched) {
     console.error(">>> 企业微信启动失败，已重试 " + MAX_LAUNCH_RETRIES + " 次");
+    debugPage("企业微信启动失败");
     toast("企业微信启动失败");
     alert("签到失败", "企业微信启动超时，请检查应用状态");
     exit();
@@ -602,6 +629,7 @@ for (var pageRetry = 1; pageRetry <= MAX_PAGE_RETRIES; pageRetry++) {
     var fudaomao = waitFor(function() { return textContains(CONFIG.entryText).findOnce(); }, 10000);
     if (!fudaomao) {
         console.error(">>> 未找到辅导猫入口，退出");
+        debugPage("未找到辅导猫入口");
         exit();
     }
     console.log(">>> 点击: 辅导猫 (尝试 " + pageRetry + "/" + MAX_PAGE_RETRIES + ")");
@@ -622,6 +650,7 @@ for (var pageRetry = 1; pageRetry <= MAX_PAGE_RETRIES; pageRetry++) {
 
 if (!activities || activities.length === 0) {
     console.log(">>> 没有今日活动，退出");
+    debugPage("没有今日活动");
     toast("没有今日活动");
     alert("签到完成", "今日没有需要签到的活动");
     exit();
@@ -639,6 +668,10 @@ for (var i = 0; i < activities.length; i++) {
     var fullText = act.text() || "";
     var b = act.bounds();
     
+    // 解析活动名称（第一行）和截止时间
+    var lines = fullText.split("\n");
+    var activityName = lines[0] || "";
+    
     // 解析截止时间（格式：签到截止时间：2026年02月21日 22:00）
     var deadlineMatch = fullText.match(/签到截止时间[：:]\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/);
     var isExpired = false;
@@ -651,12 +684,13 @@ for (var i = 0; i < activities.length; i++) {
         var hour = parseInt(deadlineMatch[4]);
         var minute = parseInt(deadlineMatch[5]);
         var deadline = new Date(year, month, day, hour, minute);
-        deadlineStr = deadlineMatch[0];
+        deadlineStr = month + 1 + "/" + day + " " + hour + ":" + (minute < 10 ? "0" + minute : minute);
         isExpired = now > deadline;
     }
     
     todoList.push({
-        name: fullText.substring(0, 50),
+        name: activityName,
+        fullText: fullText.substring(0, 50),
         centerY: b.centerY(),
         isExpired: isExpired,
         deadlineStr: deadlineStr
@@ -668,7 +702,8 @@ var validCount = 0;
 todoList.forEach(function(item, idx) {
     var status = item.isExpired ? "[已过期]" : "[待处理]";
     if (!item.isExpired) validCount++;
-    console.log((idx + 1) + ". " + status + " " + item.name.substring(0, 25));
+    var deadline = item.deadlineStr ? " (截止:" + item.deadlineStr + ")" : "";
+    console.log((idx + 1) + ". " + status + " " + item.name + deadline);
 });
 console.log("有效活动: " + validCount + "/" + todoList.length);
 console.log("======================\n");
@@ -689,20 +724,15 @@ for (var todoIdx = 0; todoIdx < todoList.length; todoIdx++) {
     
     // 跳过已处理的活动
     if (processedNames[todoItem.name]) {
-        console.log(">>> 跳过已处理: " + todoItem.name.substring(0, 25));
+        console.log(">>> 跳过已处理: " + todoItem.name);
         continue;
     }
     processedNames[todoItem.name] = true;
     
-    // 跳过已过期的活动
+    console.log("\n===== 活动 " + (todoIdx + 1) + "/" + todoList.length + ": " + todoItem.name + " =====");
     if (todoItem.isExpired) {
-        console.log("\n===== 活动 " + (todoIdx + 1) + "/" + todoList.length + " =====");
-        console.log(">>> 跳过已过期: " + todoItem.name.substring(0, 25));
-        results.push({ name: todoItem.name.substring(0, 25), result: "time_expired" });
-        continue;
+        console.log(">>> 截止时间已过 (" + todoItem.deadlineStr + ")，检查是否已签到...");
     }
-    
-    console.log("\n===== 活动 " + (todoIdx + 1) + "/" + todoList.length + ": " + todoItem.name.substring(0, 25) + " =====");
     
     // 重新查找活动（页面可能已刷新）
     var activity = null;
@@ -717,7 +747,7 @@ for (var todoIdx = 0; todoIdx < todoList.length; todoIdx++) {
     
     if (!activity) {
         console.log(">>> 活动已消失，跳过");
-        results.push({ name: todoItem.name.substring(0, 25), result: "not_found" });
+        results.push({ name: todoItem.name, deadline: todoItem.deadlineStr, result: "not_found" });
         continue;
     }
     
@@ -735,7 +765,13 @@ for (var todoIdx = 0; todoIdx < todoList.length; todoIdx++) {
         result = "error";
     }
     console.log(">>> 签到结果: " + result);
-    results.push({ name: todoItem.name.substring(0, 25), result: result });
+    
+    // 失败时分析当前页面
+    if (result !== "success" && result !== "already_signed") {
+        debugPage("签到失败 - " + result);
+    }
+    
+    results.push({ name: todoItem.name, deadline: todoItem.deadlineStr, result: result });
     
     // 返回活动列表
     console.log(">>> 返回");
@@ -752,22 +788,38 @@ console.log("\n===== 结果汇总 =====");
 var successCount = 0;
 var failCount = 0;
 var skipCount = 0;
-var expiredCount = 0;
+var missedCount = 0;
+var failedNames = [];
+var missedNames = [];
+
 results.forEach(function(r, idx) {
-    console.log((idx + 1) + ". " + r.name + " -> " + r.result);
+    var deadline = r.deadline ? " (截止:" + r.deadline + ")" : "";
+    console.log((idx + 1) + ". " + r.name + deadline + " -> " + r.result);
     if (r.result === "success") successCount++;
     else if (r.result === "already_signed") skipCount++;
-    else if (r.result === "time_expired") expiredCount++;
-    else failCount++;
+    else if (r.result === "missed") {
+        missedCount++;
+        missedNames.push(r.name + (r.deadline ? "\n  截止:" + r.deadline : ""));
+    } else {
+        failCount++;
+        failedNames.push(r.name + (r.deadline ? "\n  截止:" + r.deadline : ""));
+    }
 });
 console.log("=== 完成 ===");
 
 // 弹窗显示结果
-var summary = "成功: " + successCount + "\n已签到: " + skipCount + "\n已过期: " + expiredCount + "\n失败: " + failCount;
-if (failCount === 0) {
+var summary = "成功: " + successCount + "\n已签到: " + skipCount + "\n错过签到: " + missedCount + "\n失败: " + failCount;
+if (missedCount > 0) {
+    summary += "\n\n错过签到:\n" + missedNames.join("\n");
+}
+if (failCount > 0) {
+    summary += "\n\n失败活动:\n" + failedNames.join("\n");
+}
+
+if (failCount === 0 && missedCount === 0) {
     toast("签到完成！");
     alert("签到完成", summary);
 } else {
     toast("签到有异常，请检查");
-    alert("签到结果", summary + "\n\n请检查失败的活动");
+    alert("签到结果", summary);
 }
