@@ -1,7 +1,7 @@
 {
     "name": "企业微信自动打卡",
-    "versionCode": 8,
-    "versionName": "1.0.7",
+    "versionCode": 18,
+    "versionName": "1.0.17",
     "packageName": "com.example.wework.checkin",
     "main": "main.js",
     "ignore": [
