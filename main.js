@@ -214,10 +214,9 @@ var isRunning = false;
 // 注意：只有签到成功才会设置，失败不会阻止后续尝试
 var todayTriggered = false;
 
-// 备用定时已触发标记 - 记录今天备用定时是否已执行
-// 防止在同一分钟内重复触发备用定时
-// 与 todayTriggered 独立，即使通知触发成功，也会记录备用定时状态
-var fallbackTriggered = false;
+// 备用定时重试计数 - 失败后最多重试 3 次
+var fallbackAttempts = 0;
+var MAX_FALLBACK_ATTEMPTS = 3;
 
 // 上次检查的日期 - 用于检测日期变化
 // 格式："年-月-日"，如 "2024-1-15"
@@ -262,7 +261,7 @@ function resetDailyFlag() {
     var today = getTodayStr();
     if (lastCheckedDate !== today) {
         todayTriggered = false;
-        fallbackTriggered = false;
+        fallbackAttempts = 0;
         lastCheckedDate = today;
         console.log("[日期变更] 重置每日触发标记");
     }
@@ -1223,13 +1222,14 @@ console.log("监听中... (保持脚本运行)");
 
 setInterval(function() {
     resetDailyFlag();
-    
-    // 刷新前台通知（防止用户删除后保活失效）
     refreshNotification();
     
-    if (!todayTriggered && !fallbackTriggered && isFallbackTime()) {
-        fallbackTriggered = true;
-        console.log("[备用定时] 通知触发时段内未签到，执行备用签到");
-        triggerCheckin("备用定时");
+    if (!todayTriggered && fallbackAttempts < MAX_FALLBACK_ATTEMPTS && isFallbackTime()) {
+        fallbackAttempts++;
+        console.log("[备用定时] 尝试 " + fallbackAttempts + "/" + MAX_FALLBACK_ATTEMPTS);
+        var success = triggerCheckin("备用定时");
+        if (success) {
+            fallbackAttempts = MAX_FALLBACK_ATTEMPTS;
+        }
     }
 }, 30000);
