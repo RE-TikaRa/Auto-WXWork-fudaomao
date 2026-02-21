@@ -9,6 +9,7 @@
 - `tools/analyze-screen.js`：页面控件分析工具，用于选择器排障。
 - `project.json`：项目元信息（入口与版本号）。
 - `README.md`：面向用户的使用文档。
+- `CHANGELOG.md`：完整版本历史。
 - `AutoJs6-Documentation/`：本地官方文档快照，**禁止修改**。
 
 ---
@@ -87,6 +88,7 @@
 代码行为变化后，必须同步更新：
 
 - `README.md` 的功能表、配置说明、流程描述、FAQ、更新日志
+- `CHANGELOG.md` 的版本历史明细
 - `AGENTS.md` 的实现约束与测试清单
 - `project.json` 的版本号（仅在发布版本时）
 
