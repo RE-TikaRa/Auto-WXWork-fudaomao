@@ -1,18 +1,25 @@
 "auto";
 auto.waitFor();
 
+// 自动模式主脚本：
+// 1) 监听企业微信通知（主触发）
+// 2) 到点执行备用定时（兜底触发）
+// 3) 运行完整签到流程并记录结果通知 + 日志文件
 var CONFIG = {
     packageName: "com.tencent.wework",
     reasonText: "离校",
     entryText: "辅导猫",
     keywords: ["打卡", "签到", "辅导猫"],
+    // 通知触发生效窗口（仅在该时段处理通知）
     startHour: 7, // 小时（24小时制）
     startMinute: 50, // 分钟
     endHour: 8, // 小时（24小时制）
     endMinute: 10, // 分钟
+    // 通知未触发时，按这些时间点执行备用尝试
     fallbackTimes: ["10:30", "12:00", "18:00"],
 };
 
+// 启动时快速验证无障碍服务，避免后续所有选择器都失效。
 try {
     selector().exists();
     console.log("[服务] 无障碍服务正常");
@@ -22,6 +29,7 @@ try {
     exit();
 }
 
+// 关闭 AutoJs 自身可能遗留的结果弹窗，避免遮挡后续页面识别。
 function dismissOwnDialogs() {
     var titles = ["签到完成", "签到失败", "签到结果"];
     var dismissed = 0;
@@ -51,6 +59,7 @@ function dismissOwnDialogs() {
 }
 dismissOwnDialogs();
 
+// 前台通知用于脚本保活；结果通知用于回报签到结果。
 var NOTIFICATION_ID = 10086;
 var RESULT_NOTIFICATION_ID = 10087;
 
@@ -70,16 +79,20 @@ function refreshNotification() {
     }
 }
 
+// 全局运行参数与状态变量。
 var POLL_INTERVAL = 200;
 var MAX_WAIT = 10000;
 var ANIM_DELAY = 500;
 var GLOBAL_TIMEOUT = 180000;
+var FALLBACK_TRIGGER_WINDOW_MS = 60000;
 var isRunning = false;
+// 原子锁：保证任意时刻只有一个签到流程在跑（通知触发 + 备用定时共享）。
 var runningFlag = new java.util.concurrent.atomic.AtomicBoolean(false);
 var todayTriggered = false;
 var MAX_FALLBACK_ATTEMPTS = 3;
 var fallbackStates = {};
 var lastCheckedDate = "";
+var fallbackStartMinutes = new Date().getHours() * 60 + new Date().getMinutes();
 var FALLBACK_TIMES = parseFallbackTimes(CONFIG.fallbackTimes);
 
 function getTodayStr() {
@@ -87,6 +100,10 @@ function getTodayStr() {
     return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
 }
 
+// fallbackTimes 解析规则：
+// - 仅接收 HH:mm
+// - 自动去重并按时间升序
+// - 生成 { time: "HH:mm", minutes: 总分钟 } 结构供后续比较
 function parseFallbackTimes(timeList) {
     var normalized = [];
     var seen = {};
@@ -108,6 +125,7 @@ function parseFallbackTimes(timeList) {
     return normalized;
 }
 
+// 每天初始化每个备用时间点的尝试状态。
 function resetFallbackStates() {
     fallbackStates = {};
     for (var i = 0; i < FALLBACK_TIMES.length; i++) {
@@ -119,16 +137,21 @@ function resetFallbackStates() {
     }
 }
 
+// 日期切换时重置“今日已触发”与备用尝试状态。
 function resetDailyFlag() {
     var today = getTodayStr();
     if (lastCheckedDate !== today) {
         todayTriggered = false;
         resetFallbackStates();
+        // 首次启动只接收“当前时刻之后”的备用时间点；
+        // 跨天后重置为 00:00，避免影响新的一天。
+        if (lastCheckedDate !== "") fallbackStartMinutes = 0;
         lastCheckedDate = today;
         console.log("[日期变更] 重置每日触发标记");
     }
 }
 
+// 判断当前是否处于通知触发的有效时间窗。
 function isInTimeRange() {
     var now = new Date();
     var h = now.getHours();
@@ -143,14 +166,34 @@ function formatTime(h, m) {
     return h.toString().padStart(2, "0") + ":" + m.toString().padStart(2, "0");
 }
 
+// 选择“当前应该执行”的备用时间点：
+// - 时间必须已到
+// - 未完成，且未超过重试上限
+// - 30 秒内不会重复打同一时间点（防止定时器重入）
 function getFallbackCandidate(nowTs) {
     var now = new Date(nowTs);
     var nowMinutes = now.getHours() * 60 + now.getMinutes();
+    var y = now.getFullYear();
+    var mo = now.getMonth();
+    var d = now.getDate();
     for (var i = 0; i < FALLBACK_TIMES.length; i++) {
         var item = FALLBACK_TIMES[i];
-        if (nowMinutes < item.minutes) continue;
         var state = fallbackStates[item.time];
         if (!state || state.finished) continue;
+        if (item.minutes < fallbackStartMinutes) {
+            state.finished = true;
+            continue;
+        }
+        if (nowMinutes < item.minutes) continue;
+
+        var targetHour = Math.floor(item.minutes / 60);
+        var targetMinute = item.minutes % 60;
+        var targetTs = new Date(y, mo, d, targetHour, targetMinute, 0, 0).getTime();
+        if (nowTs - targetTs > FALLBACK_TRIGGER_WINDOW_MS) {
+            state.finished = true;
+            continue;
+        }
+
         if (state.attempts >= MAX_FALLBACK_ATTEMPTS) {
             state.finished = true;
             continue;
@@ -162,6 +205,7 @@ function getFallbackCandidate(nowTs) {
     return null;
 }
 
+// 发送系统结果通知（用于在脚本后台运行时快速查看结果）。
 function sendResultNotification(content) {
     try {
         notice({
@@ -176,6 +220,7 @@ function sendResultNotification(content) {
     }
 }
 
+// 将每次签到结果写入 logs/checkin-YYYY-MM-DD.log，便于追溯。
 function saveCheckinLog(reason, startedAt, endedAt, summary, results) {
     try {
         var datePart =
@@ -211,6 +256,7 @@ function saveCheckinLog(reason, startedAt, endedAt, summary, results) {
     }
 }
 
+// 确保设备亮屏并解锁到可操作状态。
 function wakeUp() {
     if (device.isScreenOn()) return true;
     console.log(">>> 唤醒屏幕...");
@@ -232,6 +278,10 @@ function wakeUp() {
     return true;
 }
 
+// 统一轮询等待：
+// - finder 返回真值即成功
+// - 到超时返回 null
+// - 支持全局超时保护，避免流程卡死
 function waitFor(finder, timeout, globalStart) {
     timeout = timeout || MAX_WAIT;
     var start = Date.now();
@@ -247,6 +297,7 @@ function waitFor(finder, timeout, globalStart) {
     return null;
 }
 
+// 点击回退策略：控件自身 -> 父控件 -> 中心坐标点击。
 function smartClick(widget) {
     if (!widget) return false;
     if (widget.clickable()) return widget.click();
@@ -256,6 +307,7 @@ function smartClick(widget) {
     return click(b.centerX(), b.centerY());
 }
 
+// 调试辅助：输出当前页面关键控件信息，便于排查选择器问题。
 function debugPage(tag) {
     console.log("\n========== [DEBUG] " + tag + " ==========");
 
@@ -326,6 +378,7 @@ function debugPage(tag) {
 }
 
 function doCheckin(globalStart) {
+    // 第 1 阶段：识别当前详情页是否有可点击签到入口，或已签到状态。
     var pageState = waitFor(
         function () {
             var btn = text("范围外签到").findOnce();
@@ -380,6 +433,7 @@ function doCheckin(globalStart) {
     console.log(">>> 点击: " + pageState.btn.text());
     smartClick(pageState.btn);
 
+    // 第 2 阶段：部分页面需要先点“继续签到”才能进入真正提交流程。
     var continueBtn = waitFor(
         function () {
             return text("继续签到").findOnce();
@@ -394,6 +448,7 @@ function doCheckin(globalStart) {
     }
 
     // 注意："为何不能签到？"是页面上的固定链接，不能作为过期判断依据
+    // 第 3 阶段：若仍显示“未签到”，尝试定位底部真正的签到按钮。
     if (textContains("未签到").exists()) {
         var bottomSignBtn = null;
         var signBtns = text("签到").find();
@@ -439,6 +494,7 @@ function doCheckin(globalStart) {
         );
     }
 
+    // 第 4 阶段：处理拍照签到链路（权限 -> 快门 -> 使用照片 -> 填写原因 -> 完成）。
     var photoBtn = waitFor(
         function () {
             return text("去拍照").findOnce();
@@ -542,6 +598,7 @@ function doCheckin(globalStart) {
         }
     }
 
+    // 第 5 阶段：以“已签到”作为最终成功判定。
     if (
         waitFor(
             function () {
@@ -562,6 +619,7 @@ function runCheckinFlow(triggerReason) {
     var startedAt = new Date();
     var reason = triggerReason || "未知触发";
 
+    // 统一收尾：发送通知 + 写日志 + 返回是否视为“今日完成”。
     function finishFlow(hasSuccess, summary, results) {
         sendResultNotification(summary.split("\n").slice(0, 4).join(" | "));
         saveCheckinLog(reason, startedAt, new Date(), summary, results || []);
@@ -582,6 +640,7 @@ function runCheckinFlow(triggerReason) {
     var MAX_LAUNCH_RETRIES = 3;
     var appLaunched = false;
 
+    // 阶段 A：重启企业微信并确认已进入可见首页。
     for (var retry = 1; retry <= MAX_LAUNCH_RETRIES; retry++) {
         console.log(
             ">>> 尝试启动企业微信 (" + retry + "/" + MAX_LAUNCH_RETRIES + ")",
@@ -691,6 +750,7 @@ function runCheckinFlow(triggerReason) {
         "日";
     console.log(">>> 今天: " + todayStr);
 
+    // 阶段 B：进入“辅导猫”并拉取今日活动列表（失败会返回重试）。
     for (var pageRetry = 1; pageRetry <= MAX_PAGE_RETRIES; pageRetry++) {
         var fudaomao = waitFor(
             function () {
@@ -741,6 +801,7 @@ function runCheckinFlow(triggerReason) {
     var now = new Date();
     console.log(">>> 当前时间: " + now.toLocaleString());
 
+    // 阶段 C：预扫描活动，提前解析截止时间并构建待处理队列。
     for (var i = 0; i < activities.length; i++) {
         var act = activities[i];
         var fullText = act.text() || "";
@@ -800,6 +861,7 @@ function runCheckinFlow(triggerReason) {
     var processedNames = {}; // 已处理的活动名称集合
     var hasSuccess = false;
 
+    // 阶段 D：按活动逐个执行签到，期间持续受全局超时保护。
     for (var todoIdx = 0; todoIdx < todoList.length; todoIdx++) {
         if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
             console.error(">>> 全局超时，退出");
@@ -886,6 +948,7 @@ function runCheckinFlow(triggerReason) {
     var failedNames = [];
     var missedNames = [];
 
+    // 阶段 E：结果汇总，区分成功/已签到/错过/失败。
     results.forEach(function (r, idx) {
         var deadline = r.deadline ? " (截止:" + r.deadline + ")" : "";
         console.log(idx + 1 + ". " + r.name + deadline + " -> " + r.result);
@@ -927,12 +990,16 @@ function runCheckinFlow(triggerReason) {
         toast("签到有异常，请检查");
     }
 
+    // 今日完成条件：
+    // - 只要有一次成功，视为完成
+    // - 或者全部都是“已签到/无失败/无错过”，同样视为完成
     var dayDone =
         hasSuccess || (failCount === 0 && missedCount === 0 && skipCount > 0);
     return finishFlow(dayDone, summary, results);
 }
 
 function triggerCheckin(reason) {
+    // compareAndSet 失败说明已有流程在跑，直接忽略本次触发。
     if (!runningFlag.compareAndSet(false, true)) {
         console.log("[忽略] 签到流程正在运行中");
         return false;
@@ -954,6 +1021,7 @@ function triggerCheckin(reason) {
     return success;
 }
 
+// 启动信息输出，便于核对配置是否生效。
 console.log("===== 辅导猫自动签到服务 =====");
 console.log("监听包名: " + CONFIG.packageName);
 console.log("触发关键词: " + CONFIG.keywords.join(", "));
@@ -969,6 +1037,10 @@ console.log(
             return item.time;
         }).join(", ") +
         " (如通知未触发)",
+);
+console.log("备用窗口: 每个时间点仅在到点后 60 秒内触发");
+console.log(
+    "启动策略: 今日仅处理启动时刻之后的备用时间点（已过时间点自动跳过）",
 );
 console.log("");
 if (FALLBACK_TIMES.length === 0) {
@@ -987,6 +1059,7 @@ events.on("exit", function () {
 
 resetDailyFlag();
 
+// 通知监听失败时，脚本仍可通过备用定时继续工作。
 try {
     events.observeNotification();
 } catch (e) {
@@ -994,6 +1067,7 @@ try {
     toast("通知监听启动失败，仅保留备用定时");
 }
 
+// 通知触发：过滤包名、时间窗、关键词后启动签到线程。
 events.on("notification", function (notification) {
     resetDailyFlag();
 
@@ -1027,6 +1101,9 @@ events.on("notification", function (notification) {
 
 console.log("监听中... (保持脚本运行)");
 
+// 30 秒心跳：
+// - 刷新前台通知（保活）
+// - 按备用时间点触发签到（仅当今日尚未完成）
 setInterval(function () {
     resetDailyFlag();
     refreshNotification();

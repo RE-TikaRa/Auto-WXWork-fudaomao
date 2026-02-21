@@ -1,12 +1,16 @@
 "auto";
 auto.waitFor();
 
+// 手动模式脚本：
+// - 不依赖通知与备用定时
+// - 立即执行一次完整签到流程，便于排查与验证
 var CONFIG = {
     packageName: "com.tencent.wework",
     reasonText: "离校",
     entryText: "辅导猫",
 };
 
+// 启动前验证无障碍，避免后续选择器全部失效。
 try {
     selector().exists();
     console.log("[服务] 无障碍服务正常");
@@ -16,6 +20,7 @@ try {
     exit();
 }
 
+// 清理 AutoJs 内部遗留弹窗，防止遮挡后续操作。
 function dismissOwnDialogs() {
     var titles = ["签到完成", "签到失败", "签到结果"];
     var dismissed = 0;
@@ -45,12 +50,14 @@ function dismissOwnDialogs() {
 }
 dismissOwnDialogs();
 
+// 轮询间隔/超时参数（手动模式与自动模式保持一致）。
 var POLL_INTERVAL = 200;
 var MAX_WAIT = 10000;
 var ANIM_DELAY = 500;
 var GLOBAL_TIMEOUT = 180000;
 var globalStart = Date.now();
 
+// 调试辅助：输出页面关键词与可点击控件信息。
 function debugPage(tag) {
     console.log("\n========== [DEBUG] " + tag + " ==========");
 
@@ -120,6 +127,7 @@ function debugPage(tag) {
     console.log("========== [/DEBUG] ==========\n");
 }
 
+// 确保屏幕亮起并可交互。
 function wakeUp() {
     if (device.isScreenOn()) return true;
     console.log(">>> 唤醒屏幕...");
@@ -141,6 +149,7 @@ function wakeUp() {
     return true;
 }
 
+// 统一轮询等待，包含全局超时保护。
 function waitFor(finder, timeout) {
     timeout = timeout || MAX_WAIT;
     var start = Date.now();
@@ -157,6 +166,7 @@ function waitFor(finder, timeout) {
     return null;
 }
 
+// 点击回退策略：自身可点 -> 父节点可点 -> 坐标点击。
 function smartClick(widget) {
     if (!widget) return false;
     if (widget.clickable()) return widget.click();
@@ -167,8 +177,10 @@ function smartClick(widget) {
 }
 
 function doCheckin() {
+    // 进入活动详情页后先打调试快照，便于复盘。
     debugPage("进入活动详情页");
 
+    // 第 1 阶段：识别当前页是否可签到、已签到、或无按钮。
     var pageState = waitFor(function () {
         var btn = text("范围外签到").findOnce();
         if (btn) {
@@ -224,6 +236,7 @@ function doCheckin() {
     sleep(1000);
     debugPage("点击签到按钮后");
 
+    // 第 2 阶段：处理“继续签到”中间页。
     var continueBtn = waitFor(function () {
         return text("继续签到").findOnce();
     }, 5000);
@@ -235,6 +248,7 @@ function doCheckin() {
 
     // 注意："为何不能签到？"是页面上的固定链接，不能作为过期判断依据
 
+    // 第 3 阶段：若仍是未签到状态，尝试点击底部主操作按钮。
     if (textContains("未签到").exists()) {
         var bottomSignBtn = null;
         var signBtns = text("签到").find();
@@ -282,6 +296,7 @@ function doCheckin() {
         );
     }
 
+    // 第 4 阶段：拍照签到链路（权限、拍照、使用照片、填写原因、提交）。
     var photoBtn = waitFor(function () {
         return text("去拍照").findOnce();
     }, 5000);
@@ -385,6 +400,7 @@ if (!wakeUp()) {
 var MAX_LAUNCH_RETRIES = 3;
 var appLaunched = false;
 
+// 阶段 A：重启并启动企业微信，确保落到可操作首页。
 for (var retry = 1; retry <= MAX_LAUNCH_RETRIES; retry++) {
     console.log(
         ">>> 尝试启动企业微信 (" + retry + "/" + MAX_LAUNCH_RETRIES + ")",
@@ -470,6 +486,7 @@ var todayStr =
     "日";
 console.log(">>> 今天: " + todayStr);
 
+// 阶段 B：进入辅导猫并读取今日活动列表。
 for (var pageRetry = 1; pageRetry <= MAX_PAGE_RETRIES; pageRetry++) {
     var fudaomao = waitFor(function () {
         return textContains(CONFIG.entryText).findOnce();
@@ -509,6 +526,7 @@ var todoList = [];
 var now = new Date();
 console.log(">>> 当前时间: " + now.toLocaleString());
 
+// 阶段 C：预扫描活动，解析截止时间并标记是否过期。
 for (var i = 0; i < activities.length; i++) {
     var act = activities[i];
     var fullText = act.text() || "";
@@ -565,6 +583,7 @@ console.log("======================\n");
 var results = [];
 var processedNames = {};
 
+// 阶段 D：逐个活动执行签到。
 for (var todoIdx = 0; todoIdx < todoList.length; todoIdx++) {
     if (Date.now() - globalStart > GLOBAL_TIMEOUT) {
         console.error(">>> 全局超时，退出");
@@ -652,6 +671,7 @@ var missedCount = 0;
 var failedNames = [];
 var missedNames = [];
 
+// 阶段 E：结果归类汇总并弹窗展示。
 results.forEach(function (r, idx) {
     var deadline = r.deadline ? " (截止:" + r.deadline + ")" : "";
     console.log(idx + 1 + ". " + r.name + deadline + " -> " + r.result);

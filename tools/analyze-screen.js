@@ -1,6 +1,9 @@
 "auto";
 auto.waitFor();
 
+// 界面分析工具：
+// - 读取当前页面的核心控件（文本、可点击、输入框、按钮、图片等）
+// - 输出位置/可点击状态，辅助修正签到脚本里的选择器与坐标策略
 var pkg = currentPackage();
 var act = currentActivity();
 var dm = context.getResources().getDisplayMetrics();
@@ -29,6 +32,7 @@ console.log(
 );
 var textViews = className("android.widget.TextView").find();
 var textCount = 0;
+// 主文本层，优先用于文案匹配和活动信息提取。
 textViews.forEach(function (w) {
     var t = w.text();
     if (t && t.trim()) {
@@ -67,6 +71,7 @@ console.log(
 );
 var views = className("android.view.View").find();
 var viewCount = 0;
+// WebView 通常承载 H5 页面元素，文本可见但点击行为常不稳定。
 views.forEach(function (w) {
     var t = w.text() || w.desc();
     if (t && t.trim()) {
@@ -106,6 +111,7 @@ console.log(
 );
 var clickables = clickable(true).find();
 var clickCount = 0;
+// 直接可点击控件，用于验证 smartClick 是否能覆盖主要入口。
 clickables.forEach(function (w) {
     clickCount++;
     var t = w.text() || w.desc() || "";
@@ -146,6 +152,7 @@ var editTexts = className("android.widget.EditText").find();
 if (editTexts.length === 0) {
     console.log("  (无)");
 } else {
+    // 填写请假原因等输入项。
     editTexts.forEach(function (w, i) {
         var b = w.bounds();
         console.log("");
@@ -177,6 +184,7 @@ var buttons = className("android.widget.Button").find();
 if (buttons.length === 0) {
     console.log("  (无)");
 } else {
+    // 原生按钮，常用于确定/提交等高优先级动作。
     buttons.forEach(function (w, i) {
         var b = w.bounds();
         console.log("");
@@ -207,6 +215,7 @@ console.log(
 );
 var images = className("android.widget.ImageView").find();
 var imgCount = 0;
+// 快门等图标按钮通常是 ImageView，使用尺寸和中心点辅助定位。
 images.forEach(function (w) {
     var b = w.bounds();
     if (b.width() > 50 && b.height() > 50) {
@@ -250,6 +259,7 @@ console.log(
     "================================================================================",
 );
 var keywords = ["签到", "完成", "拍照", "使用照片", "继续", "确定", "取消"];
+// 快速验证关键业务文案当前是否可见、是否可点击。
 keywords.forEach(function (kw) {
     var found = textContains(kw).findOnce();
     if (found) {
