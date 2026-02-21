@@ -75,6 +75,7 @@ var MAX_WAIT = 10000;
 var ANIM_DELAY = 500;
 var GLOBAL_TIMEOUT = 180000;
 var isRunning = false;
+var runningFlag = new java.util.concurrent.atomic.AtomicBoolean(false);
 var todayTriggered = false;
 var MAX_FALLBACK_ATTEMPTS = 3;
 var fallbackStates = {};
@@ -673,7 +674,6 @@ function runCheckinFlow(triggerReason) {
         );
         debugPage("企业微信启动失败");
         toast("企业微信启动失败");
-        alert("签到失败", "企业微信启动超时，请检查应用状态");
         return finishFlow(
             false,
             "成功: 0\n已签到: 0\n错过签到: 0\n失败: 1\n\n失败活动:\n企业微信启动超时",
@@ -734,12 +734,7 @@ function runCheckinFlow(triggerReason) {
         console.log(">>> 没有今日活动");
         debugPage("没有今日活动");
         toast("没有今日活动");
-        alert("签到完成", "今日没有需要签到的活动");
-        return finishFlow(
-            false,
-            "成功: 0\n已签到: 0\n错过签到: 0\n失败: 0",
-            [],
-        );
+        return finishFlow(true, "成功: 0\n已签到: 0\n错过签到: 0\n失败: 0", []);
     }
 
     var todoList = [];
@@ -928,35 +923,34 @@ function runCheckinFlow(triggerReason) {
 
     if (failCount === 0 && missedCount === 0) {
         toast("签到完成！");
-        alert("签到完成", summary);
     } else {
         toast("签到有异常，请检查");
-        alert("签到结果", summary);
     }
 
-    return finishFlow(hasSuccess, summary, results);
+    var dayDone =
+        hasSuccess || (failCount === 0 && missedCount === 0 && skipCount > 0);
+    return finishFlow(dayDone, summary, results);
 }
 
 function triggerCheckin(reason) {
-    if (isRunning) {
+    if (!runningFlag.compareAndSet(false, true)) {
         console.log("[忽略] 签到流程正在运行中");
         return false;
     }
 
     console.log("\n[" + reason + "] " + new Date().toLocaleString());
-
     isRunning = true;
-
     var success = false;
     try {
         success = runCheckinFlow(reason);
         if (success) todayTriggered = true;
     } catch (e) {
         console.error("签到流程异常: " + e);
+    } finally {
+        isRunning = false;
+        runningFlag.set(false);
+        console.log(">>> 签到流程锁已释放");
     }
-
-    isRunning = false;
-    console.log(">>> 签到流程锁已释放");
     return success;
 }
 
@@ -977,6 +971,9 @@ console.log(
         " (如通知未触发)",
 );
 console.log("");
+if (FALLBACK_TIMES.length === 0) {
+    console.warn("[配置] fallbackTimes 无有效时间，备用定时将不会触发");
+}
 
 if (refreshNotification()) {
     console.log("[服务] 前台通知已创建");
@@ -990,7 +987,12 @@ events.on("exit", function () {
 
 resetDailyFlag();
 
-events.observeNotification();
+try {
+    events.observeNotification();
+} catch (e) {
+    console.warn("[通知] 通知监听启动失败，仅保留备用定时: " + e);
+    toast("通知监听启动失败，仅保留备用定时");
+}
 
 events.on("notification", function (notification) {
     resetDailyFlag();

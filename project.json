@@ -1,12 +1,10 @@
 {
     "name": "企业微信自动打卡",
-    "versionCode": 29,
-    "versionName": "1.8.1",
+    "versionCode": 30,
+    "versionName": "1.8.2",
     "packageName": "com.example.wework.checkin",
     "main": "main.js",
-    "ignore": [
-        "build"
-    ],
+    "ignore": ["build"],
     "launchConfig": {
         "hideLogs": false
     }
