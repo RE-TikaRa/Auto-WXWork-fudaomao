@@ -115,8 +115,7 @@ function debugPage(tag) {
         console.log("包名/Activity: (远程模式不可用)");
     }
     
-    // 查找关键文本
-    var keywords = ["已签到", "未签到", "签到", "范围外签到", "为何不能签到", "继续签到", "去拍照", "完成签到"];
+    var keywords = ["已签到", "未签到", "签到", "范围外签到", "继续签到", "去拍照", "完成签到", "已结束"];
     console.log("\n[关键词检测]");
     keywords.forEach(function(kw) {
         var found = textContains(kw).find();

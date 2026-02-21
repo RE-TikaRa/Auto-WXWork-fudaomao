@@ -67,23 +67,44 @@ dismissOwnDialogs();
 //   - 关闭省电模式
 // ============================================================================
 
-// 尝试创建前台服务通知
-try {
-    notice({
-        title: "辅导猫自动签到",
-        content: "签到服务运行中",
-        notificationId: 10086,
-        isSilent: true,
-        autoCancel: false
-    });
-    console.log("[服务] 前台通知已创建");
-    
-    events.on("exit", function() {
-        try { notice.cancel(10086); } catch (e) {}
-    });
-} catch (e) {
-    console.warn("[服务] 无法创建前台通知: " + e);
+// 前台服务通知 ID
+var NOTIFICATION_ID = 10086;
+
+/**
+ * 刷新前台服务通知
+ * 
+ * 【作用】
+ * 重新发送前台通知，确保通知始终存在。
+ * 由于使用相同的 notificationId，不会产生多个通知，只会覆盖/刷新。
+ * 
+ * 【为什么需要定期刷新】
+ * 用户可能手动滑动删除通知，删除后保活机制失效。
+ * 定期刷新可以恢复被删除的通知，确保脚本持续受到保护。
+ */
+function refreshNotification() {
+    try {
+        notice({
+            title: "辅导猫自动签到",
+            content: "签到服务运行中",
+            notificationId: NOTIFICATION_ID,
+            isSilent: true,
+            autoCancel: false
+        });
+        return true;
+    } catch (e) {
+        console.warn("[服务] 无法创建前台通知: " + e);
+        return false;
+    }
 }
+
+// 尝试创建前台服务通知
+if (refreshNotification()) {
+    console.log("[服务] 前台通知已创建");
+}
+
+events.on("exit", function() {
+    try { notice.cancel(NOTIFICATION_ID); } catch (e) {}
+});
 
 // ============================================================================
 // 签到配置
@@ -1201,14 +1222,14 @@ events.on("notification", function(notification) {
 console.log("监听中... (保持脚本运行)");
 
 setInterval(function() {
-    // 每次定时器触发时检查日期是否变化
     resetDailyFlag();
     
-    // 检查是否需要执行备用定时签到
-    // 条件：今天未签到成功 且 备用定时未执行 且 当前是备用定时时间
+    // 刷新前台通知（防止用户删除后保活失效）
+    refreshNotification();
+    
     if (!todayTriggered && !fallbackTriggered && isFallbackTime()) {
-        fallbackTriggered = true;  // 标记备用定时已执行，防止重复触发
+        fallbackTriggered = true;
         console.log("[备用定时] 通知触发时段内未签到，执行备用签到");
         triggerCheckin("备用定时");
     }
-}, 30000);  // 每 30 秒检查一次
+}, 30000);
