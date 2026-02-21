@@ -1,7 +1,18 @@
 "auto";
 auto.waitFor();
 
-// 验证无障碍服务是否正常工作
+var CONFIG = {
+    packageName: "com.tencent.wework",
+    reasonText: "离校",
+    entryText: "辅导猫",
+    keywords: ["打卡", "签到", "辅导猫"],
+    startHour: 7, // 小时（24小时制）
+    startMinute: 50, // 分钟
+    endHour: 8, // 小时（24小时制）
+    endMinute: 10, // 分钟
+    fallbackTimes: ["10:30", "12:00", "18:00"],
+};
+
 try {
     selector().exists();
     console.log("[服务] 无障碍服务正常");
@@ -11,7 +22,6 @@ try {
     exit();
 }
 
-// 关闭上次运行遗留的弹窗（仅限本脚本的 alert 弹窗）
 function dismissOwnDialogs() {
     var titles = ["签到完成", "签到失败", "签到结果"];
     var dismissed = 0;
@@ -41,33 +51,6 @@ function dismissOwnDialogs() {
 }
 dismissOwnDialogs();
 
-// ============================================================================
-// 前台服务通知 - 防止 Android 系统杀死脚本
-// ============================================================================
-//
-// 【问题背景】
-// Android 7.0+ 系统会积极回收后台进程以节省电量和内存。
-// 即使脚本有 setInterval 和 events.observeNotification() 保持运行，
-// 系统仍可能在以下情况下终止 AutoJs6 进程：
-//   1. 电池优化 - 系统判定 AutoJs6 为"不活跃"应用
-//   2. 内存压力 - 系统需要释放内存给前台应用
-//   3. 省电模式 - 更激进地杀死后台进程
-//   4. 厂商定制 - 部分手机厂商有额外的后台限制
-//
-// 【解决方案】
-// 通过发送一个常驻通知（ongoing notification），让系统认为脚本有活跃的
-// 前台任务正在运行，从而大幅降低被系统杀死的概率。
-// 这是 Android 官方推荐的后台服务保活方式。
-//
-// 【注意事项】
-// 此方案不能 100% 保证脚本不被杀死，还需要配合以下手动设置：
-//   - 关闭 AutoJs6 的电池优化（设置 → 电池 → AutoJs6 → 无限制）
-//   - 在最近任务中锁定 AutoJs6
-//   - 开启 AutoJs6 的自启动权限（部分手机需要）
-//   - 关闭省电模式
-// ============================================================================
-
-// 前台服务通知 ID
 var NOTIFICATION_ID = 10086;
 var RESULT_NOTIFICATION_ID = 10087;
 
@@ -87,137 +70,16 @@ function refreshNotification() {
     }
 }
 
-// 尝试创建前台服务通知
-if (refreshNotification()) {
-    console.log("[服务] 前台通知已创建");
-}
-
-events.on("exit", function () {
-    try {
-        notice.cancel(NOTIFICATION_ID);
-    } catch (e) {}
-});
-
-// ============================================================================
-// 签到配置
-// ============================================================================
-//
-// 【配置说明】
-// 修改以下配置以适应你的实际情况。
-// 大部分用户只需要修改 reasonText（签到原因）和时间相关配置。
-// ============================================================================
-
-var CONFIG = {
-    // -------------------------------------------------------------------------
-    // 应用配置
-    // -------------------------------------------------------------------------
-
-    // 企业微信包名 - 用于启动应用和强制停止
-    // 一般无需修改，除非你使用的是特殊版本的企业微信
-    packageName: "com.tencent.wework",
-
-    // 范围外签到时填写的原因
-    // 当你不在签到范围内时，系统会要求填写原因，这里自动填入此文本
-    reasonText: "离校",
-
-    // 企业微信工作台中辅导猫入口的文本
-    // 脚本通过查找包含此文本的控件来定位辅导猫入口
-    // 如果你的辅导猫显示名称不同，请修改此值
-    entryText: "辅导猫",
-
-    // -------------------------------------------------------------------------
-    // 通知触发配置
-    // -------------------------------------------------------------------------
-
-    // 触发关键词列表
-    // 当企业微信通知的标题或内容包含以下任一关键词时，触发签到
-    // 可以根据实际收到的通知内容添加或修改关键词
-    keywords: ["打卡", "签到", "辅导猫"],
-
-    // 通知触发生效时段 - 开始时间
-    // 只有在此时段内收到的通知才会触发签到
-    // 避免在非签到时间被无关通知误触发
-    startHour: 7, // 小时（24小时制）
-    startMinute: 50, // 分钟
-
-    // 通知触发生效时段 - 结束时间
-    endHour: 8, // 小时（24小时制）
-    endMinute: 10, // 分钟
-
-    // -------------------------------------------------------------------------
-    // 备用定时配置
-    // -------------------------------------------------------------------------
-
-    // 备用定时签到时间列表（24小时制）
-    // 格式：["HH:mm", "HH:mm"]
-    fallbackTimes: ["10:30", "12:00", "18:00"],
-};
-
-// ============================================================================
-// 运行时常量
-// ============================================================================
-//
-// 【常量说明】
-// 这些常量控制脚本的运行行为，一般无需修改。
-// 如果遇到特定问题（如页面加载慢），可以适当调整。
-// ============================================================================
-
-// 轮询间隔（毫秒）
-// waitFor 函数在等待元素出现时，每隔此时间检查一次
-// 值越小响应越快，但 CPU 占用越高
-// 推荐范围：100-500ms
 var POLL_INTERVAL = 200;
-
-// 单次等待超时（毫秒）
-// waitFor 函数等待单个元素的最长时间
-// 如果超过此时间元素仍未出现，返回 null
-// 推荐范围：5000-15000ms
 var MAX_WAIT = 10000;
-
-// 动画延迟（毫秒）
-// 在点击按钮前等待的时间，确保页面动画完成
-// 如果点击经常失败，可以适当增加此值
-// 推荐范围：300-1000ms
 var ANIM_DELAY = 500;
-
-// 全局超时（毫秒）
-// 整个签到流程的最长执行时间
-// 超过此时间强制退出，防止脚本卡死
-// 当前设置：180000ms = 3分钟
 var GLOBAL_TIMEOUT = 180000;
-
-// ============================================================================
-// 运行时状态变量
-// ============================================================================
-//
-// 【状态说明】
-// 这些变量用于跟踪脚本的运行状态，防止重复触发和记录每日签到情况。
-// ============================================================================
-
-// 运行锁 - 防止签到流程并发执行
-// 当签到流程正在运行时为 true，此时忽略新的触发请求
-// 避免多个通知同时触发导致的混乱
 var isRunning = false;
-
-// 今日已触发标记 - 记录今天是否已成功签到
-// 签到成功后设为 true，防止重复签到
-// 注意：只有签到成功才会设置，失败不会阻止后续尝试
 var todayTriggered = false;
-
-// 备用定时重试计数 - 每个时间点失败后最多重试 3 次
 var MAX_FALLBACK_ATTEMPTS = 3;
 var fallbackStates = {};
-
-// 上次检查的日期 - 用于检测日期变化
-// 格式："年-月-日"，如 "2024-1-15"
-// 当日期变化时，重置 todayTriggered 和 fallbackStates
 var lastCheckedDate = "";
-
 var FALLBACK_TIMES = parseFallbackTimes(CONFIG.fallbackTimes);
-
-// ============================================================================
-// 工具函数 - 时间和日期
-// ============================================================================
 
 function getTodayStr() {
     var d = new Date();
@@ -348,10 +210,6 @@ function saveCheckinLog(reason, startedAt, endedAt, summary, results) {
     }
 }
 
-// ============================================================================
-// 工具函数 - 设备操作
-// ============================================================================
-
 function wakeUp() {
     if (device.isScreenOn()) return true;
     console.log(">>> 唤醒屏幕...");
@@ -372,10 +230,6 @@ function wakeUp() {
     sleep(500);
     return true;
 }
-
-// ============================================================================
-// 工具函数 - UI 等待和点击
-// ============================================================================
 
 function waitFor(finder, timeout, globalStart) {
     timeout = timeout || MAX_WAIT;
@@ -470,20 +324,9 @@ function debugPage(tag) {
     console.log("========== [/DEBUG] ==========\n");
 }
 
-// ============================================================================
-// 签到核心逻辑
-// ============================================================================
-
 function doCheckin(globalStart) {
-    // -------------------------------------------------------------------------
-    // 步骤 1: 等待页面加载，查找签到按钮
-    // -------------------------------------------------------------------------
-    // 只查找签到按钮，不在轮询中检测过期状态
-    // 过期检测放到超时后，避免页面加载过程中误判
-    // -------------------------------------------------------------------------
     var pageState = waitFor(
         function () {
-            // 优先查找"范围外签到"按钮
             var btn = text("范围外签到").findOnce();
             if (btn) {
                 var b = btn.bounds();
@@ -496,7 +339,6 @@ function doCheckin(globalStart) {
                 }
             }
 
-            // 查找普通"签到"按钮
             var candidates = text("签到").find();
             for (var i = 0; i < candidates.length; i++) {
                 var cls = candidates[i].className();
@@ -507,7 +349,6 @@ function doCheckin(globalStart) {
                 }
             }
 
-            // 检查是否已签到（这个可以提前返回）
             if (textContains("已签到").exists()) return "already_signed";
 
             return null;
@@ -516,19 +357,16 @@ function doCheckin(globalStart) {
         globalStart,
     );
 
-    // 处理检测结果
     if (pageState === "already_signed") {
         console.log(">>> 已签到，跳过");
         return "already_signed";
     }
 
-    // 未找到签到按钮时，检查是否过期
     if (!pageState || !pageState.btn) {
         if (text("已结束").exists()) {
             console.log(">>> 活动已结束");
             return "missed";
         }
-        // 显示"未签到"但没有签到按钮 = 已过期未签到
         if (textContains("未签到").exists()) {
             console.log(">>> 已过期未签到（无签到按钮）");
             return "missed";
@@ -537,16 +375,10 @@ function doCheckin(globalStart) {
         return "no_button";
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 2: 点击签到按钮
-    // -------------------------------------------------------------------------
     sleep(ANIM_DELAY);
     console.log(">>> 点击: " + pageState.btn.text());
     smartClick(pageState.btn);
 
-    // -------------------------------------------------------------------------
-    // 步骤 3: 处理"继续签到"弹窗（可选）
-    // -------------------------------------------------------------------------
     var continueBtn = waitFor(
         function () {
             return text("继续签到").findOnce();
@@ -560,13 +392,8 @@ function doCheckin(globalStart) {
         smartClick(continueBtn);
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 3.5: 处理"未签到"状态
-    // -------------------------------------------------------------------------
     // 注意："为何不能签到？"是页面上的固定链接，不能作为过期判断依据
-    // -------------------------------------------------------------------------
     if (textContains("未签到").exists()) {
-        // 查找底部区域的签到按钮（80% < Y < 95%，排除导航栏）
         var bottomSignBtn = null;
         var signBtns = text("签到").find();
         for (var i = 0; i < signBtns.length; i++) {
@@ -611,9 +438,6 @@ function doCheckin(globalStart) {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 4: 处理拍照流程（如果需要）
-    // -------------------------------------------------------------------------
     var photoBtn = waitFor(
         function () {
             return text("去拍照").findOnce();
@@ -626,8 +450,6 @@ function doCheckin(globalStart) {
         console.log(">>> 点击: 去拍照");
         smartClick(photoBtn);
 
-        // 4a. 处理相机权限弹窗
-        // 不同系统的权限按钮文本可能不同，需要匹配多种情况
         var permissionBtn = waitFor(
             function () {
                 return (
@@ -645,8 +467,6 @@ function doCheckin(globalStart) {
             sleep(500);
         }
 
-        // 4b. 点击快门按钮
-        // 通过尺寸和位置识别快门按钮（屏幕中央的圆形按钮）
         var shutterBtn = waitFor(
             function () {
                 var minSize = device.width * 0.1; // 最小尺寸：屏幕宽度的 10%
@@ -654,7 +474,6 @@ function doCheckin(globalStart) {
                 return className("android.widget.ImageView")
                     .filter(function (w) {
                         var b = w.bounds();
-                        // 条件：尺寸在范围内，且水平位置接近屏幕中央
                         return (
                             b.width() >= minSize &&
                             b.width() <= maxSize &&
@@ -675,7 +494,6 @@ function doCheckin(globalStart) {
             click(b.centerX(), b.centerY());
         }
 
-        // 4c. 点击"使用照片"
         var usePhotoBtn = waitFor(
             function () {
                 return text("使用照片").findOnce();
@@ -689,7 +507,6 @@ function doCheckin(globalStart) {
             smartClick(usePhotoBtn);
         }
 
-        // 4d. 填写签到原因
         var inputBox = waitFor(
             function () {
                 return className("EditText").findOnce();
@@ -707,7 +524,6 @@ function doCheckin(globalStart) {
             back(); // 收起键盘，否则可能遮挡"完成签到"按钮
         }
 
-        // 4e. 点击"完成签到"
         var finalBtn = waitFor(
             function () {
                 return textContains("完成签到").findOnce();
@@ -725,9 +541,6 @@ function doCheckin(globalStart) {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 5: 验证签到结果
-    // -------------------------------------------------------------------------
     if (
         waitFor(
             function () {
@@ -743,12 +556,7 @@ function doCheckin(globalStart) {
     return "unknown";
 }
 
-// ============================================================================
-// 签到流程控制
-// ============================================================================
-
 function runCheckinFlow(triggerReason) {
-    // 记录流程开始时间，用于全局超时控制
     var globalStart = Date.now();
     var startedAt = new Date();
     var reason = triggerReason || "未知触发";
@@ -761,9 +569,6 @@ function runCheckinFlow(triggerReason) {
 
     console.log("\n===== 开始签到流程 =====");
 
-    // -------------------------------------------------------------------------
-    // 步骤 1: 唤醒屏幕
-    // -------------------------------------------------------------------------
     if (!wakeUp()) {
         console.error(">>> 唤醒失败");
         return finishFlow(
@@ -773,9 +578,6 @@ function runCheckinFlow(triggerReason) {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 2-3: 杀掉企业微信后台并启动（最多重试3次）
-    // -------------------------------------------------------------------------
     var MAX_LAUNCH_RETRIES = 3;
     var appLaunched = false;
 
@@ -784,7 +586,6 @@ function runCheckinFlow(triggerReason) {
             ">>> 尝试启动企业微信 (" + retry + "/" + MAX_LAUNCH_RETRIES + ")",
         );
 
-        // 杀掉后台
         console.log(">>> 杀掉企业微信后台...");
         app.openAppSetting(CONFIG.packageName);
         var forceStopBtn = waitFor(
@@ -829,12 +630,10 @@ function runCheckinFlow(triggerReason) {
         home();
         sleep(500);
 
-        // 启动企业微信
         console.log(">>> 启动企业微信...");
         app.launch(CONFIG.packageName);
         sleep(3000);
 
-        // 检测是否成功启动（超时30秒）
         appLaunched = waitFor(
             function () {
                 return (
@@ -849,7 +648,6 @@ function runCheckinFlow(triggerReason) {
         if (appLaunched) {
             console.log(">>> 企业微信启动成功");
 
-            // 确保回到消息页（点击底部"消息"tab）
             var msgTab = text("消息")
                 .boundsInside(
                     0,
@@ -883,9 +681,6 @@ function runCheckinFlow(triggerReason) {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 4: 进入辅导猫（带重试）
-    // -------------------------------------------------------------------------
     var MAX_PAGE_RETRIES = 2;
     var activities = null;
     var today = new Date();
@@ -947,9 +742,6 @@ function runCheckinFlow(triggerReason) {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 5: 预扫描生成待签到列表（解析并标记截止时间）
-    // -------------------------------------------------------------------------
     var todoList = [];
     var now = new Date();
     console.log(">>> 当前时间: " + now.toLocaleString());
@@ -959,11 +751,9 @@ function runCheckinFlow(triggerReason) {
         var fullText = act.text() || "";
         var b = act.bounds();
 
-        // 解析活动名称（第一行）和截止时间
         var lines = fullText.split("\n");
         var activityName = lines[0] || "";
 
-        // 解析截止时间（格式：签到截止时间：2026年02月21日 22:00）
         var deadlineMatch = fullText.match(
             /签到截止时间[：:]\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})/,
         );
@@ -1011,9 +801,6 @@ function runCheckinFlow(triggerReason) {
     console.log("有效活动: " + validCount + "/" + todoList.length);
     console.log("======================\n");
 
-    // -------------------------------------------------------------------------
-    // 步骤 6: 按列表顺序处理每个活动
-    // -------------------------------------------------------------------------
     var results = [];
     var processedNames = {}; // 已处理的活动名称集合
     var hasSuccess = false;
@@ -1026,7 +813,6 @@ function runCheckinFlow(triggerReason) {
 
         var todoItem = todoList[todoIdx];
 
-        // 跳过已处理的活动（按名称去重）
         if (processedNames[todoItem.name]) {
             console.log(">>> 跳过已处理: " + todoItem.name);
             continue;
@@ -1050,7 +836,6 @@ function runCheckinFlow(triggerReason) {
             );
         }
 
-        // 重新查找活动（页面可能已刷新）
         var activity = null;
         var currentActivities = textContains(todayStr).find();
         for (var j = 0; j < currentActivities.length; j++) {
@@ -1071,11 +856,9 @@ function runCheckinFlow(triggerReason) {
             continue;
         }
 
-        // 点击进入活动详情
         console.log(">>> 点击活动: Y=" + activity.bounds().centerY());
         smartClick(activity);
 
-        // 执行签到
         var result;
         try {
             result = doCheckin(globalStart);
@@ -1085,7 +868,6 @@ function runCheckinFlow(triggerReason) {
             result = "error";
         }
 
-        // 失败时分析当前页面
         if (result !== "success" && result !== "already_signed") {
             debugPage("签到失败 - " + result);
         }
@@ -1096,15 +878,11 @@ function runCheckinFlow(triggerReason) {
             result: result,
         });
 
-        // 返回活动列表
         console.log(">>> 返回");
         back();
         sleep(1000);
     }
 
-    // -------------------------------------------------------------------------
-    // 步骤 7: 输出结果汇总
-    // -------------------------------------------------------------------------
     console.log("\n===== 结果汇总 =====");
     var successCount = 0;
     var failCount = 0;
@@ -1132,7 +910,6 @@ function runCheckinFlow(triggerReason) {
     });
     console.log("===== 签到流程结束 =====\n");
 
-    // 弹窗显示结果
     var summary =
         "成功: " +
         successCount +
@@ -1161,7 +938,6 @@ function runCheckinFlow(triggerReason) {
 }
 
 function triggerCheckin(reason) {
-    // 检查运行锁
     if (isRunning) {
         console.log("[忽略] 签到流程正在运行中");
         return false;
@@ -1169,27 +945,20 @@ function triggerCheckin(reason) {
 
     console.log("\n[" + reason + "] " + new Date().toLocaleString());
 
-    // 获取运行锁
     isRunning = true;
 
     var success = false;
     try {
         success = runCheckinFlow(reason);
-        // 只有成功才标记今日已触发
         if (success) todayTriggered = true;
     } catch (e) {
         console.error("签到流程异常: " + e);
     }
 
-    // 释放运行锁
     isRunning = false;
     console.log(">>> 签到流程锁已释放");
     return success;
 }
-
-// ============================================================================
-// 服务启动 - 输出配置信息
-// ============================================================================
 
 console.log("===== 辅导猫自动签到服务 =====");
 console.log("监听包名: " + CONFIG.packageName);
@@ -1209,48 +978,34 @@ console.log(
 );
 console.log("");
 
-resetDailyFlag();
+if (refreshNotification()) {
+    console.log("[服务] 前台通知已创建");
+}
 
-// ============================================================================
-// 通知监听
-// ============================================================================
-//
-// 【工作原理】
-// 1. events.observeNotification() 启动通知监听服务
-// 2. 当任何应用发出通知时，触发 "notification" 事件
-// 3. 在事件处理函数中过滤和处理通知
-//
-// 【过滤条件】
-// 1. 包名必须是企业微信（CONFIG.packageName）
-// 2. 当前时间必须在生效时段内（isInTimeRange）
-// 3. 通知标题或内容必须包含配置的关键词
-//
-// 【注意】
-// 通知监听依赖于通知访问权限，需要在系统设置中授予 AutoJs6 通知访问权限。
-// 如果权限未授予，events.observeNotification() 会抛出异常。
-// ============================================================================
+events.on("exit", function () {
+    try {
+        notice.cancel(NOTIFICATION_ID);
+    } catch (e) {}
+});
+
+resetDailyFlag();
 
 events.observeNotification();
 
 events.on("notification", function (notification) {
-    // 每次收到通知时检查日期是否变化
     resetDailyFlag();
 
-    // 获取通知信息
     var pkg = notification.getPackageName();
     var title = notification.getTitle() || "";
     var notificationText = notification.getText() || "";
 
-    // 过滤条件 1: 包名必须是企业微信
     if (pkg !== CONFIG.packageName) return;
 
-    // 过滤条件 2: 必须在生效时段内
     if (!isInTimeRange()) {
         console.log("[忽略] 不在生效时段");
         return;
     }
 
-    // 过滤条件 3: 必须匹配关键词
     var content = title + " " + notificationText;
     var matched = CONFIG.keywords.some(function (kw) {
         return content.indexOf(kw) >= 0;
@@ -1261,36 +1016,12 @@ events.on("notification", function (notification) {
         return;
     }
 
-    // 所有条件通过，触发签到（在子线程中执行，避免 UI 线程阻塞）
     console.log("  标题: " + title);
     console.log("  内容: " + notificationText);
     threads.start(function () {
         triggerCheckin("通知触发");
     });
 });
-
-// ============================================================================
-// 备用定时器
-// ============================================================================
-//
-// 【为什么需要备用定时】
-// 通知触发可能因以下原因失败：
-// 1. 通知被系统拦截或延迟
-// 2. 通知内容不包含配置的关键词
-// 3. 收到通知时不在生效时段内
-// 4. 网络问题导致通知延迟
-//
-// 备用定时作为保底方案，在指定时间自动执行签到。
-//
-// 【触发条件】
-// 1. todayTriggered === false（今天还没有成功签到）
-// 2. 当前时间 >= 某个备用时间点
-// 3. 该时间点重试次数 < MAX_FALLBACK_ATTEMPTS
-//
-// 【定时器间隔】
-// 每 30 秒检查一次。命中备用时间点后按 30 秒间隔重试，
-// 每个时间点最多重试 MAX_FALLBACK_ATTEMPTS 次。
-// ============================================================================
 
 console.log("监听中... (保持脚本运行)");
 
