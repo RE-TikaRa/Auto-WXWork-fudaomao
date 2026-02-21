@@ -891,10 +891,12 @@ events.on("notification", function(notification) {
         return;
     }
     
-    // 所有条件通过，触发签到
+    // 所有条件通过，触发签到（在子线程中执行，避免 UI 线程阻塞）
     console.log("  标题: " + title);
     console.log("  内容: " + notificationText);
-    triggerCheckin("通知触发");
+    threads.start(function() {
+        triggerCheckin("通知触发");
+    });
 });
 
 // ============================================================================
